@@ -3,3 +3,6 @@ client/dist/
 .env
 *.log
 .DS_Store
+tsconfig.tsbuildinfo
+.claude/
+.mcp.json
