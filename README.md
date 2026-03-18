@@ -66,9 +66,8 @@ cd guesty-migrate
 cp .env.example .env
 # Edit .env with your actual values
 
-# Install dependencies
+# Install all dependencies (root + client via postinstall)
 npm install
-cd client && npm install && cd ..
 
 # Run database migrations (auto-runs on server start)
 npm run db:migrate
