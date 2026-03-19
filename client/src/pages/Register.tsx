@@ -8,6 +8,7 @@ export default function Register() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const { register } = useAuth();
   const navigate = useNavigate();
 
@@ -81,7 +82,7 @@ export default function Register() {
             />
           </div>
 
-          <div className="mb-6">
+          <div className="mb-4">
             <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
               Confirm Password
             </label>
@@ -96,9 +97,30 @@ export default function Register() {
             />
           </div>
 
+          <div className="mb-6">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={agreedToTerms}
+                onChange={(e) => setAgreedToTerms(e.target.checked)}
+                className="mt-1 w-4 h-4 text-indigo-600 rounded"
+              />
+              <span className="text-sm text-gray-600">
+                I agree to the{' '}
+                <a href="/terms" target="_blank" className="text-indigo-600 hover:text-indigo-700 underline">
+                  Terms of Service
+                </a>{' '}
+                and{' '}
+                <a href="/privacy" target="_blank" className="text-indigo-600 hover:text-indigo-700 underline">
+                  Privacy Policy
+                </a>
+              </span>
+            </label>
+          </div>
+
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !agreedToTerms}
             className="w-full bg-indigo-600 text-white py-2.5 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
           >
             {loading ? 'Creating account...' : 'Create Account'}
