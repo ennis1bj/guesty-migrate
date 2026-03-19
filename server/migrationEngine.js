@@ -137,6 +137,14 @@ const CATEGORIES = {
       if (cleaned.listingId && maps.listings) {
         cleaned.listingId = maps.listings[cleaned.listingId] || cleaned.listingId;
       }
+      // assigneeId cannot be remapped (different user IDs in dest account)
+      // Remove it so the task is created unassigned rather than with a broken ref
+      if (cleaned.assigneeId) {
+        delete cleaned.assigneeId;
+      }
+      if (Array.isArray(cleaned.assignees)) {
+        delete cleaned.assignees;
+      }
       return cleaned;
     },
   },
