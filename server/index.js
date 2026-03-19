@@ -1,7 +1,7 @@
 require('dotenv').config();
 
 // Validate required environment variables at startup
-const REQUIRED_ENV = ['DATABASE_URL', 'JWT_SECRET', 'ENCRYPTION_KEY', 'STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY'];
+const REQUIRED_ENV = ['DATABASE_URL', 'JWT_SECRET', 'ENCRYPTION_KEY', 'STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY', 'STRIPE_WEBHOOK_SECRET'];
 const missing = REQUIRED_ENV.filter((key) => !process.env[key]);
 if (missing.length > 0) {
   console.error(`Missing required environment variables: ${missing.join(', ')}`);
@@ -42,6 +42,14 @@ const authLimiter = rateLimit({
   message: { error: 'Too many requests, please try again later' },
 });
 app.use('/api/auth', authLimiter);
+
+// Rate limiting for migration routes
+const migrationLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  message: { error: 'Too many requests, please try again later' },
+});
+app.use('/api/migrations', migrationLimiter);
 
 // API routes
 app.use('/api/auth', authRoutes);
