@@ -117,7 +117,7 @@ Express serves the built frontend from `client/dist` for all non-API routes.
 | `STRIPE_SECRET_KEY` | Stripe secret key (sk_test_...) |
 | `STRIPE_PUBLISHABLE_KEY` | Stripe publishable key (pk_test_...) |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (whsec_...) |
-| `SENDGRID_API_KEY` | SendGrid API key for email (optional) |
+| `RESEND_API_KEY` | Resend API key for email (optional) |
 | `REDIS_URL` | Redis connection URL (optional) |
 | `FRONTEND_URL` | Frontend URL for CORS and redirects |
 | `FROM_EMAIL` | Sender email for migration reports (default: noreply@guestymigrate.com) |

@@ -67,7 +67,7 @@ To exercise any of these rights, contact us at privacy@guestymigrate.com.
 We use the following third-party services:
 
 - **Stripe**: Payment processing ([Stripe Privacy Policy](https://stripe.com/privacy))
-- **SendGrid**: Transactional email delivery ([SendGrid Privacy Policy](https://www.twilio.com/legal/privacy))
+- **Resend**: Transactional email delivery ([Resend Privacy Policy](https://resend.com/legal/privacy-policy))
 - **Guesty Open API**: Data migration source and destination (subject to your Guesty account terms)
 
 ## 8. Cookies and Local Storage

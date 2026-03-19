@@ -1,34 +1,28 @@
-const nodemailer = require('nodemailer');
+let resendClient = null;
 
-let transporter = null;
+function getClient() {
+  if (resendClient) return resendClient;
 
-function getTransporter() {
-  if (transporter) return transporter;
-
-  if (process.env.SENDGRID_API_KEY) {
-    transporter = nodemailer.createTransport({
-      host: 'smtp.sendgrid.net',
-      port: 587,
-      auth: {
-        user: 'apikey',
-        pass: process.env.SENDGRID_API_KEY,
-      },
-    });
+  if (process.env.RESEND_API_KEY) {
+    const { Resend } = require('resend');
+    resendClient = new Resend(process.env.RESEND_API_KEY);
   } else {
     // Fallback: log emails to console
-    transporter = {
-      sendMail: async (options) => {
-        console.log('Email (no SendGrid configured):', JSON.stringify(options, null, 2));
-        return { messageId: 'console-' + Date.now() };
+    resendClient = {
+      emails: {
+        send: async (options) => {
+          console.log('Email (no Resend configured):', JSON.stringify(options, null, 2));
+          return { id: 'console-' + Date.now() };
+        },
       },
     };
   }
 
-  return transporter;
+  return resendClient;
 }
 
 async function sendMigrationReport(to, migration) {
-  const transport = getTransporter();
+  const client = getClient();
 
   const categoryRows = migration.diff_report
     ? Object.entries(migration.diff_report)
@@ -51,7 +45,7 @@ async function sendMigrationReport(to, migration) {
         .join('')
     : '<tr><td colspan="4">No report available</td></tr>';
 
-  await transport.sendMail({
+  await client.emails.send({
     from: process.env.FROM_EMAIL || 'noreply@guestymigrate.com',
     to,
     subject: `GuestyMigrate — Migration ${migration.status === 'complete' ? 'Complete' : 'Report'}`,

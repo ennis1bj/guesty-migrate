@@ -95,8 +95,8 @@ export default function Privacy() {
               </a>)
             </li>
             <li>
-              <strong>SendGrid</strong> — Email delivery (
-              <a href="https://www.twilio.com/legal/privacy" className="text-indigo-600 hover:text-indigo-700" target="_blank" rel="noopener noreferrer">
+              <strong>Resend</strong> — Email delivery (
+              <a href="https://resend.com/legal/privacy-policy" className="text-indigo-600 hover:text-indigo-700" target="_blank" rel="noopener noreferrer">
                 Privacy Policy
               </a>)
             </li>
