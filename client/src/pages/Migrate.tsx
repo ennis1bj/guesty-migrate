@@ -63,12 +63,8 @@ interface MigrationStatus {
   }>;
 }
 
-/**
- * Compute per-listing graduated price (mirrors server logic).
- *   Base: $79 + $8/listing (1-50) + $5/listing (51-200) + $3/listing (201+)
- */
 function calculatePerListingCents(listingCount: number): number {
-  let total = 7900; // base
+  let total = 7900;
   const t1 = Math.min(listingCount, 50);
   total += t1 * 800;
   const t2 = Math.min(Math.max(listingCount - 50, 0), 150);
@@ -85,22 +81,18 @@ export default function Migrate() {
   const [currentStep, setCurrentStep] = useState(0);
   const [migrationId, setMigrationId] = useState<string | null>(null);
 
-  // Step 1: Credentials
   const [sourceClientId, setSourceClientId] = useState('');
   const [sourceClientSecret, setSourceClientSecret] = useState('');
   const [destClientId, setDestClientId] = useState('');
   const [destClientSecret, setDestClientSecret] = useState('');
 
-  // Step 2: Manifest
   const [manifest, setManifest] = useState<Record<string, number> | null>(null);
   const [selectedCategories, setSelectedCategories] = useState<string[]>(ALL_CATEGORIES);
   const [pricing, setPricing] = useState<Pricing | null>(null);
 
-  // Step 3: Payment options
   const [pricingMode, setPricingMode] = useState<PricingMode>('flat_tier');
   const [selectedAddOns, setSelectedAddOns] = useState<AddOnKey[]>([]);
 
-  // Step 4: Progress
   const [migrationStatus, setMigrationStatus] = useState<MigrationStatus | null>(null);
 
   const [loading, setLoading] = useState(false);
@@ -108,7 +100,6 @@ export default function Migrate() {
   const [channelConfirmed, setChannelConfirmed] = useState(false);
   const [showQuoteModal, setShowQuoteModal] = useState(false);
 
-  // Handle returning from Stripe checkout
   useEffect(() => {
     const step = searchParams.get('step');
     const id = searchParams.get('migrationId');
@@ -118,7 +109,6 @@ export default function Migrate() {
     }
   }, [searchParams]);
 
-  // Poll migration status
   const pollStatus = useCallback(async () => {
     if (!migrationId) return;
     try {
@@ -221,7 +211,6 @@ export default function Migrate() {
 
   const formatPrice = (cents: number) => `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 
-  // Compute totals
   const flatCents = pricing?.amountCents || 0;
   const perListingCents = manifest ? calculatePerListingCents(manifest.listings) : 0;
   const addonTotal = selectedAddOns.reduce((sum, key) => {
@@ -231,7 +220,6 @@ export default function Migrate() {
   const baseCents = pricingMode === 'flat_tier' ? flatCents : perListingCents;
   const grandTotal = baseCents + addonTotal;
 
-  // Best value badge
   const flatIsBetter = flatCents <= perListingCents;
 
   const downloadReport = () => {
@@ -251,35 +239,35 @@ export default function Migrate() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold text-gray-900 mb-2">New Migration</h1>
-      <p className="text-gray-600 mb-8">Follow the steps below to migrate your Guesty account data.</p>
+      <h1 className="text-3xl font-bold text-slate-900 tracking-tight mb-2">New Migration</h1>
+      <p className="text-slate-500 mb-8">Follow the steps below to migrate your Guesty account data.</p>
 
       <StepWizard steps={STEPS} currentStep={currentStep} />
 
       {error && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700">
           {error}
         </div>
       )}
 
-      {/* ── Quote Modal (enterprise_plus) ──────────────────────────────── */}
+      {/* Quote Modal */}
       {showQuoteModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8">
-            <h3 className="text-xl font-bold text-gray-900 mb-2">Custom Quote Required</h3>
-            <p className="text-gray-600 mb-4">
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Custom Quote Required</h3>
+            <p className="text-slate-500 mb-4">
               Accounts with 500+ listings require a custom migration plan. Our team will
               assess your account and provide a tailored quote within 24 hours.
             </p>
             <a
               href="mailto:support@guestymigrate.com?subject=Enterprise%20Migration%20Quote&body=I%20have%20500%2B%20listings%20and%20need%20a%20custom%20migration%20quote."
-              className="block w-full text-center bg-indigo-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors mb-3"
+              className="block w-full text-center bg-amber-500 hover:bg-amber-600 text-slate-900 px-6 py-3 rounded-xl font-semibold transition-all duration-200 mb-3"
             >
               Contact Us for a Quote
             </a>
             <button
               onClick={() => setShowQuoteModal(false)}
-              className="block w-full text-center text-gray-500 hover:text-gray-700 text-sm"
+              className="block w-full text-center text-slate-400 hover:text-slate-600 text-sm"
             >
               Close
             </button>
@@ -287,58 +275,58 @@ export default function Migrate() {
         </div>
       )}
 
-      {/* ── Step 1: Credentials ────────────────────────────────────────── */}
+      {/* Step 1: Credentials */}
       {currentStep === 0 && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-6">Enter API Credentials</h2>
+        <div className="bg-white rounded-2xl shadow-sm border border-stone-200 p-8">
+          <h2 className="text-xl font-bold text-slate-900 mb-6">Enter API Credentials</h2>
 
           <div className="space-y-6">
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <h3 className="font-semibold text-blue-900 mb-3">Source Account (migrate FROM)</h3>
+            <div className="bg-sky-50 border border-sky-200 rounded-xl p-5">
+              <h3 className="font-bold text-sky-900 mb-3">Source Account (migrate FROM)</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Client ID</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Client ID</label>
                   <input
                     type="text"
                     value={sourceClientId}
                     onChange={(e) => setSourceClientId(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                    className="w-full px-4 py-3 border border-stone-300 rounded-xl bg-white text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 outline-none transition-colors"
                     placeholder="Source Client ID"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Client Secret</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Client Secret</label>
                   <input
                     type="password"
                     value={sourceClientSecret}
                     onChange={(e) => setSourceClientSecret(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                    className="w-full px-4 py-3 border border-stone-300 rounded-xl bg-white text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 outline-none transition-colors"
                     placeholder="Source Client Secret"
                   />
                 </div>
               </div>
             </div>
 
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-              <h3 className="font-semibold text-green-900 mb-3">Destination Account (migrate TO)</h3>
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5">
+              <h3 className="font-bold text-emerald-900 mb-3">Destination Account (migrate TO)</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Client ID</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Client ID</label>
                   <input
                     type="text"
                     value={destClientId}
                     onChange={(e) => setDestClientId(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                    className="w-full px-4 py-3 border border-stone-300 rounded-xl bg-white text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 outline-none transition-colors"
                     placeholder="Destination Client ID"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Client Secret</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Client Secret</label>
                   <input
                     type="password"
                     value={destClientSecret}
                     onChange={(e) => setDestClientSecret(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                    className="w-full px-4 py-3 border border-stone-300 rounded-xl bg-white text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 outline-none transition-colors"
                     placeholder="Destination Client Secret"
                   />
                 </div>
@@ -346,8 +334,8 @@ export default function Migrate() {
             </div>
           </div>
 
-          <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
-            <h3 className="font-semibold text-amber-900 mb-3">{"\u26A0\uFE0F"} Before you begin</h3>
+          <div className="mt-6 p-5 bg-amber-50 border border-amber-200 rounded-xl">
+            <h3 className="font-bold text-amber-900 mb-3">Before you begin</h3>
             <p className="text-sm text-amber-800 mb-3">
               To avoid booking conflicts, disconnect your channels from the source
               account before migrating. You can reconnect them to the destination
@@ -358,7 +346,7 @@ export default function Migrate() {
                 type="checkbox"
                 checked={channelConfirmed}
                 onChange={(e) => setChannelConfirmed(e.target.checked)}
-                className="w-4 h-4 text-indigo-600 rounded"
+                className="w-4 h-4 text-amber-500 rounded border-stone-300 focus:ring-amber-500/30"
               />
               <span className="text-sm text-amber-900 font-medium">
                 I have disconnected all channels (Airbnb, Vrbo, Booking.com) from
@@ -370,18 +358,18 @@ export default function Migrate() {
           <button
             onClick={handlePreflight}
             disabled={loading || !sourceClientId || !sourceClientSecret || !destClientId || !destClientSecret || !channelConfirmed}
-            className="mt-6 bg-indigo-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+            className="mt-6 bg-amber-500 hover:bg-amber-600 text-slate-900 px-8 py-3 rounded-xl font-semibold shadow-sm hover:shadow-md disabled:opacity-50 transition-all duration-200"
           >
             {loading ? 'Connecting...' : 'Connect & Analyze'}
           </button>
         </div>
       )}
 
-      {/* ── Step 2: Manifest & Selection ───────────────────────────────── */}
+      {/* Step 2: Manifest & Selection */}
       {currentStep === 1 && manifest && pricing && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Source Account Data</h2>
-          <p className="text-gray-600 mb-6">Select the categories you want to migrate.</p>
+        <div className="bg-white rounded-2xl shadow-sm border border-stone-200 p-8">
+          <h2 className="text-xl font-bold text-slate-900 mb-2">Source Account Data</h2>
+          <p className="text-slate-500 mb-6">Select the categories you want to migrate.</p>
 
           <ManifestCard
             manifest={Object.fromEntries(
@@ -392,9 +380,11 @@ export default function Migrate() {
           />
 
           {manifest.photos !== undefined && (
-            <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-2">
-              <span className="text-blue-600 text-lg">{"\uD83D\uDCF7"}</span>
-              <p className="text-sm text-blue-800">
+            <div className="mt-4 p-4 bg-sky-50 border border-sky-200 rounded-xl flex items-center gap-3">
+              <svg className="w-6 h-6 text-sky-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              <p className="text-sm text-sky-800">
                 <strong>{manifest.photos.toLocaleString()} photos</strong> found across
                 all listings — native listing photos will be migrated automatically
                 when Listings is selected. Channel-connected listing photos re-sync
@@ -404,31 +394,31 @@ export default function Migrate() {
             </div>
           )}
 
-          <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-            {"\u26A0\uFE0F"} <strong>Before running:</strong> Disconnect all channels (Airbnb, Vrbo,
+          <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
+            <strong>Before running:</strong> Disconnect all channels (Airbnb, Vrbo,
             Booking.com) from the source account. Channel reservations cannot be
             migrated and will be skipped automatically.
           </div>
 
-          <div className="mt-8 p-4 bg-gray-50 rounded-xl flex items-center justify-between">
+          <div className="mt-8 p-5 bg-[#fafaf8] border border-stone-200 rounded-xl flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-500">Migration Price</p>
+              <p className="text-sm text-slate-400">Migration Price</p>
               {pricing.requiresQuote ? (
                 <>
-                  <p className="text-2xl font-bold text-gray-900">Custom Quote</p>
-                  <p className="text-sm text-gray-500">500+ listings</p>
+                  <p className="text-2xl font-bold text-slate-900">Custom Quote</p>
+                  <p className="text-sm text-slate-400">500+ listings</p>
                 </>
               ) : (
                 <>
-                  <p className="text-3xl font-bold text-gray-900">from {formatPrice(Math.min(flatCents, perListingCents))}</p>
-                  <p className="text-sm text-gray-500 capitalize">{pricing.tier} tier</p>
+                  <p className="text-3xl font-extrabold text-slate-900">from {formatPrice(Math.min(flatCents, perListingCents))}</p>
+                  <p className="text-sm text-slate-400 capitalize">{pricing.tier} tier</p>
                 </>
               )}
             </div>
             {pricing.requiresQuote ? (
               <button
                 onClick={() => setShowQuoteModal(true)}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors"
+                className="bg-amber-500 hover:bg-amber-600 text-slate-900 px-8 py-3 rounded-xl font-semibold shadow-sm hover:shadow-md transition-all duration-200"
               >
                 Contact Us for a Quote
               </button>
@@ -436,7 +426,7 @@ export default function Migrate() {
               <button
                 onClick={() => setCurrentStep(2)}
                 disabled={selectedCategories.length === 0}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                className="bg-amber-500 hover:bg-amber-600 text-slate-900 px-8 py-3 rounded-xl font-semibold shadow-sm hover:shadow-md disabled:opacity-50 transition-all duration-200"
               >
                 Continue to Payment
               </button>
@@ -445,81 +435,79 @@ export default function Migrate() {
         </div>
       )}
 
-      {/* ── Step 3: Payment ────────────────────────────────────────────── */}
+      {/* Step 3: Payment */}
       {currentStep === 2 && pricing && !pricing.requiresQuote && manifest && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
+        <div className="bg-white rounded-2xl shadow-sm border border-stone-200 p-8">
           <div className="max-w-2xl mx-auto">
-            <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <div className="w-16 h-16 bg-amber-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <svg className="w-8 h-8 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
               </svg>
             </div>
-            <h2 className="text-xl font-semibold text-gray-900 mb-2 text-center">Choose Your Pricing</h2>
-            <p className="text-gray-600 mb-8 text-center">
+            <h2 className="text-xl font-bold text-slate-900 mb-2 text-center">Choose Your Pricing</h2>
+            <p className="text-slate-500 mb-8 text-center">
               Select a pricing mode and any optional add-ons for your migration.
             </p>
 
-            {/* ── Pricing Mode Toggle ──────────────────────────────────── */}
+            {/* Pricing Mode Toggle */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
-              {/* Flat Rate */}
               <button
                 onClick={() => setPricingMode('flat_tier')}
-                className={`relative p-5 rounded-xl border-2 text-left transition-all ${
+                className={`relative p-5 rounded-xl border-2 text-left transition-all duration-200 ${
                   pricingMode === 'flat_tier'
-                    ? 'border-indigo-600 bg-indigo-50 ring-1 ring-indigo-600'
-                    : 'border-gray-200 hover:border-gray-300'
+                    ? 'border-amber-500 bg-amber-50 ring-1 ring-amber-500'
+                    : 'border-stone-200 hover:border-stone-300'
                 }`}
               >
                 {flatIsBetter && (
-                  <span className="absolute -top-2.5 left-4 bg-green-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                  <span className="absolute -top-2.5 left-4 bg-emerald-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
                     Best value
                   </span>
                 )}
                 <div className="flex items-center gap-3 mb-2">
                   <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                    pricingMode === 'flat_tier' ? 'border-indigo-600' : 'border-gray-300'
+                    pricingMode === 'flat_tier' ? 'border-amber-500' : 'border-stone-300'
                   }`}>
-                    {pricingMode === 'flat_tier' && <div className="w-2 h-2 rounded-full bg-indigo-600" />}
+                    {pricingMode === 'flat_tier' && <div className="w-2 h-2 rounded-full bg-amber-500" />}
                   </div>
-                  <span className="font-semibold text-gray-900">Flat Rate</span>
+                  <span className="font-bold text-slate-900">Flat Rate</span>
                 </div>
-                <p className="text-2xl font-bold text-gray-900 ml-7">{formatPrice(flatCents)}</p>
-                <p className="text-sm text-gray-500 ml-7 capitalize">{pricing.tier} tier — {manifest.listings} listings</p>
+                <p className="text-2xl font-extrabold text-slate-900 ml-7">{formatPrice(flatCents)}</p>
+                <p className="text-sm text-slate-400 ml-7 capitalize">{pricing.tier} tier — {manifest.listings} listings</p>
               </button>
 
-              {/* Per Listing */}
               <button
                 onClick={() => setPricingMode('per_listing')}
-                className={`relative p-5 rounded-xl border-2 text-left transition-all ${
+                className={`relative p-5 rounded-xl border-2 text-left transition-all duration-200 ${
                   pricingMode === 'per_listing'
-                    ? 'border-indigo-600 bg-indigo-50 ring-1 ring-indigo-600'
-                    : 'border-gray-200 hover:border-gray-300'
+                    ? 'border-amber-500 bg-amber-50 ring-1 ring-amber-500'
+                    : 'border-stone-200 hover:border-stone-300'
                 }`}
               >
                 {!flatIsBetter && (
-                  <span className="absolute -top-2.5 left-4 bg-green-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                  <span className="absolute -top-2.5 left-4 bg-emerald-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
                     Best value
                   </span>
                 )}
                 <div className="flex items-center gap-3 mb-2">
                   <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                    pricingMode === 'per_listing' ? 'border-indigo-600' : 'border-gray-300'
+                    pricingMode === 'per_listing' ? 'border-amber-500' : 'border-stone-300'
                   }`}>
-                    {pricingMode === 'per_listing' && <div className="w-2 h-2 rounded-full bg-indigo-600" />}
+                    {pricingMode === 'per_listing' && <div className="w-2 h-2 rounded-full bg-amber-500" />}
                   </div>
-                  <span className="font-semibold text-gray-900">Per Listing</span>
+                  <span className="font-bold text-slate-900">Per Listing</span>
                 </div>
-                <p className="text-2xl font-bold text-gray-900 ml-7">{formatPrice(perListingCents)}</p>
-                <p className="text-sm text-gray-500 ml-7">$79 base + graduated per-listing rate</p>
+                <p className="text-2xl font-extrabold text-slate-900 ml-7">{formatPrice(perListingCents)}</p>
+                <p className="text-sm text-slate-400 ml-7">$79 base + graduated per-listing rate</p>
               </button>
             </div>
 
-            {/* ── Per-listing rate breakdown ────────────────────────────── */}
+            {/* Per-listing breakdown */}
             {pricingMode === 'per_listing' && (
-              <div className="mb-8 p-4 bg-gray-50 rounded-xl text-sm">
-                <h4 className="font-semibold text-gray-700 mb-2">Rate Breakdown</h4>
+              <div className="mb-8 p-5 bg-[#fafaf8] border border-stone-200 rounded-xl text-sm">
+                <h4 className="font-bold text-slate-700 mb-2">Rate Breakdown</h4>
                 <table className="w-full text-left">
-                  <tbody className="text-gray-600">
+                  <tbody className="text-slate-600">
                     <tr><td className="py-0.5">Base fee</td><td className="text-right font-medium">$79.00</td></tr>
                     {manifest.listings > 0 && (
                       <tr>
@@ -539,106 +527,104 @@ export default function Migrate() {
                         <td className="text-right font-medium">${(Math.max(manifest.listings - 200, 0) * 3).toFixed(2)}</td>
                       </tr>
                     )}
-                    <tr className="border-t border-gray-200">
-                      <td className="pt-2 font-semibold text-gray-900">Total</td>
-                      <td className="pt-2 text-right font-bold text-gray-900">{formatPrice(perListingCents)}</td>
+                    <tr className="border-t border-stone-200">
+                      <td className="pt-2 font-bold text-slate-900">Total</td>
+                      <td className="pt-2 text-right font-extrabold text-slate-900">{formatPrice(perListingCents)}</td>
                     </tr>
                   </tbody>
                 </table>
               </div>
             )}
 
-            {/* ── Optional Add-ons ─────────────────────────────────────── */}
+            {/* Add-ons */}
             <div className="mb-8">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Optional Add-ons</h3>
+              <h3 className="text-lg font-bold text-slate-900 mb-4">Optional Add-ons</h3>
               <div className="space-y-3">
                 {ADD_ONS.map((addon) => (
                   <label
                     key={addon.key}
-                    className={`flex items-start gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                    className={`flex items-start gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all duration-200 ${
                       selectedAddOns.includes(addon.key)
-                        ? 'border-indigo-600 bg-indigo-50'
-                        : 'border-gray-200 hover:border-gray-300'
+                        ? 'border-amber-500 bg-amber-50'
+                        : 'border-stone-200 hover:border-stone-300'
                     }`}
                   >
                     <input
                       type="checkbox"
                       checked={selectedAddOns.includes(addon.key)}
                       onChange={() => toggleAddOn(addon.key)}
-                      className="mt-1 w-4 h-4 text-indigo-600 rounded"
+                      className="mt-1 w-4 h-4 text-amber-500 rounded border-stone-300 focus:ring-amber-500/30"
                     />
                     <div className="flex-1">
                       <div className="flex items-center justify-between">
-                        <span className="font-semibold text-gray-900">{addon.name}</span>
-                        <span className="font-bold text-gray-900">{formatPrice(addon.priceCents)}</span>
+                        <span className="font-bold text-slate-900">{addon.name}</span>
+                        <span className="font-extrabold text-slate-900">{formatPrice(addon.priceCents)}</span>
                       </div>
-                      <p className="text-sm text-gray-500 mt-0.5">{addon.description}</p>
+                      <p className="text-sm text-slate-400 mt-0.5">{addon.description}</p>
                     </div>
                   </label>
                 ))}
               </div>
             </div>
 
-            {/* ── Order Summary ─────────────────────────────────────────── */}
-            <div className="p-4 bg-gray-50 rounded-xl mb-6">
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">Order Summary</h3>
+            {/* Order Summary */}
+            <div className="p-5 bg-[#fafaf8] border border-stone-200 rounded-xl mb-6">
+              <h3 className="text-sm font-bold text-slate-700 mb-3">Order Summary</h3>
               <div className="space-y-1 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-gray-600">
+                  <span className="text-slate-500">
                     {pricingMode === 'flat_tier' ? `${pricing.tier} flat rate` : `Per-listing (${manifest.listings} listings)`}
                   </span>
-                  <span className="font-medium text-gray-900">{formatPrice(baseCents)}</span>
+                  <span className="font-medium text-slate-900">{formatPrice(baseCents)}</span>
                 </div>
                 {selectedAddOns.map((key) => {
                   const a = ADD_ONS.find((ao) => ao.key === key);
                   return a ? (
                     <div key={key} className="flex justify-between">
-                      <span className="text-gray-600">{a.name}</span>
-                      <span className="font-medium text-gray-900">{formatPrice(a.priceCents)}</span>
+                      <span className="text-slate-500">{a.name}</span>
+                      <span className="font-medium text-slate-900">{formatPrice(a.priceCents)}</span>
                     </div>
                   ) : null;
                 })}
-                <div className="flex justify-between pt-2 border-t border-gray-200">
-                  <span className="font-semibold text-gray-900">Total</span>
-                  <span className="font-bold text-lg text-gray-900">{formatPrice(grandTotal)}</span>
+                <div className="flex justify-between pt-2 border-t border-stone-200">
+                  <span className="font-bold text-slate-900">Total</span>
+                  <span className="font-extrabold text-lg text-slate-900">{formatPrice(grandTotal)}</span>
                 </div>
               </div>
             </div>
 
-            {/* ── What's included ───────────────────────────────────────── */}
-            <div className="p-4 bg-gray-50 rounded-xl text-left mb-6">
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">What's included</h3>
-              <ul className="text-sm text-gray-600 space-y-1">
-                <li>{"\u2705"} Listings, guests, owners, reservations (direct only)</li>
-                <li>{"\u2705"} Automations and tasks</li>
-                <li>{"\u2705"} Custom fields, fees, and taxes</li>
-                <li>{"\u2705"} Native listing photos</li>
-                <li>{"\u2705"} Calendar blocks</li>
-                <li>{"\u2705"} Verification report emailed on completion</li>
+            {/* What's included */}
+            <div className="p-5 bg-[#fafaf8] border border-stone-200 rounded-xl text-left mb-6">
+              <h3 className="text-sm font-bold text-slate-700 mb-2">What's included</h3>
+              <ul className="text-sm text-slate-500 space-y-1">
+                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Listings, guests, owners, reservations (direct only)</li>
+                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Automations and tasks</li>
+                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Custom fields, fees, and taxes</li>
+                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Native listing photos</li>
+                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Calendar blocks</li>
+                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Verification report emailed on completion</li>
               </ul>
-              <h3 className="text-sm font-semibold text-gray-700 mt-4 mb-2">What's not included</h3>
-              <ul className="text-sm text-gray-600 space-y-1">
-                <li>{"\u26A0\uFE0F"} Channel reservations (Airbnb, Vrbo, Booking.com) — re-sync via channel reconnect</li>
-                <li>{"\u26A0\uFE0F"} Airbnb/Vrbo reviews — tied to the channel listing, not portable</li>
-                <li>{"\u26A0\uFE0F"} Task assignees — tasks are migrated unassigned; reassign after migration</li>
-                <li>{"\u26A0\uFE0F"} Direct booking website — must be rebuilt in the destination account</li>
-                <li>{"\u26A0\uFE0F"} Marketplace integrations — must be reconnected after migration</li>
+              <h3 className="text-sm font-bold text-slate-700 mt-4 mb-2">What's not included</h3>
+              <ul className="text-sm text-slate-500 space-y-1">
+                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg> Channel reservations — re-sync via channel reconnect</li>
+                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg> Airbnb/Vrbo reviews — tied to the channel listing</li>
+                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg> Task assignees — tasks migrate unassigned</li>
               </ul>
             </div>
 
-            <p className="text-sm text-gray-500 mb-6 text-center">
+            <p className="text-sm text-slate-400 mb-6 text-center">
               Migrating {selectedCategories.length} categories: {selectedCategories.join(', ')}
             </p>
 
             {isDemo ? (
               <div className="space-y-3">
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 font-medium">
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 font-medium">
                   Demo account — payment bypassed
                 </div>
                 <button
                   onClick={handleDemoActivate}
                   disabled={loading}
-                  className="w-full bg-indigo-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                  className="w-full bg-amber-500 hover:bg-amber-600 text-slate-900 px-8 py-3 rounded-xl font-semibold shadow-sm hover:shadow-md disabled:opacity-50 transition-all duration-200"
                 >
                   {loading ? 'Starting...' : 'Start Migration (Demo)'}
                 </button>
@@ -647,14 +633,14 @@ export default function Migrate() {
               <button
                 onClick={handleCheckout}
                 disabled={loading}
-                className="w-full bg-indigo-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                className="w-full bg-amber-500 hover:bg-amber-600 text-slate-900 px-8 py-3 rounded-xl font-semibold shadow-sm hover:shadow-md disabled:opacity-50 transition-all duration-200"
               >
                 {loading ? 'Redirecting...' : `Pay ${formatPrice(grandTotal)} & Start Migration`}
               </button>
             )}
             <button
               onClick={() => setCurrentStep(1)}
-              className="block mx-auto mt-4 text-sm text-gray-500 hover:text-gray-700"
+              className="block mx-auto mt-4 text-sm text-slate-400 hover:text-slate-600"
             >
               Go back
             </button>
@@ -662,24 +648,24 @@ export default function Migrate() {
         </div>
       )}
 
-      {/* ── Step 4: Progress ───────────────────────────────────────────── */}
+      {/* Step 4: Progress */}
       {currentStep === 3 && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
+        <div className="bg-white rounded-2xl shadow-sm border border-stone-200 p-8">
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h2 className="text-xl font-semibold text-gray-900">Migration Progress</h2>
-              <p className="text-gray-500 text-sm">ID: {migrationId}</p>
+              <h2 className="text-xl font-bold text-slate-900">Migration Progress</h2>
+              <p className="text-slate-400 text-sm font-mono">{migrationId}</p>
             </div>
             {migrationStatus && (
               <span
-                className={`px-3 py-1 rounded-full text-sm font-medium ${
+                className={`px-3 py-1 rounded-full text-sm font-semibold ${
                   migrationStatus.status === 'complete'
-                    ? 'bg-green-100 text-green-800'
+                    ? 'bg-emerald-100 text-emerald-800'
                     : migrationStatus.status === 'failed'
                     ? 'bg-red-100 text-red-800'
                     : migrationStatus.status === 'running'
-                    ? 'bg-blue-100 text-blue-800'
-                    : 'bg-gray-100 text-gray-800'
+                    ? 'bg-amber-100 text-amber-800'
+                    : 'bg-stone-100 text-slate-700'
                 }`}
               >
                 {migrationStatus.status}
@@ -689,8 +675,8 @@ export default function Migrate() {
 
           {!migrationStatus && (
             <div className="text-center py-12">
-              <div className="animate-spin w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full mx-auto mb-4" />
-              <p className="text-gray-500">Waiting for migration to start...</p>
+              <div className="animate-spin w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full mx-auto mb-4" />
+              <p className="text-slate-400">Waiting for migration to start...</p>
             </div>
           )}
 
@@ -710,18 +696,18 @@ export default function Migrate() {
 
           {migrationStatus && migrationStatus.status === 'running' && (!migrationStatus.logs || migrationStatus.logs.length === 0) && (
             <div className="text-center py-8">
-              <div className="animate-spin w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full mx-auto mb-4" />
-              <p className="text-gray-500">Migration in progress...</p>
+              <div className="animate-spin w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full mx-auto mb-4" />
+              <p className="text-slate-400">Migration in progress...</p>
             </div>
           )}
 
           {isTerminal && migrationStatus?.diff_report && (
             <div className="mt-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Verification Report</h3>
+              <h3 className="text-lg font-bold text-slate-900 mb-4">Verification Report</h3>
               <DiffReport report={migrationStatus.diff_report} />
               <button
                 onClick={downloadReport}
-                className="mt-4 bg-gray-100 text-gray-700 px-6 py-2 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+                className="mt-4 bg-stone-100 text-slate-700 px-6 py-2.5 rounded-xl font-semibold hover:bg-stone-200 transition-all duration-200"
               >
                 Download Report (JSON)
               </button>

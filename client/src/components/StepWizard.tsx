@@ -16,12 +16,12 @@ export default function StepWizard({ steps, currentStep }: StepWizardProps) {
           <li key={step.label} className={`flex items-center ${index < steps.length - 1 ? 'flex-1' : ''}`}>
             <div className="flex items-center">
               <div
-                className={`flex items-center justify-center w-10 h-10 rounded-full border-2 text-sm font-bold ${
+                className={`flex items-center justify-center w-10 h-10 rounded-xl border-2 text-sm font-bold transition-all duration-200 ${
                   index < currentStep
-                    ? 'bg-indigo-600 border-indigo-600 text-white'
+                    ? 'bg-amber-500 border-amber-500 text-slate-900'
                     : index === currentStep
-                    ? 'border-indigo-600 text-indigo-600 bg-white'
-                    : 'border-gray-300 text-gray-400 bg-white'
+                    ? 'border-amber-500 text-amber-600 bg-white'
+                    : 'border-stone-300 text-slate-400 bg-white'
                 }`}
               >
                 {index < currentStep ? (
@@ -37,14 +37,14 @@ export default function StepWizard({ steps, currentStep }: StepWizardProps) {
                 )}
               </div>
               <div className="ml-3 hidden sm:block">
-                <p className={`text-sm font-medium ${index <= currentStep ? 'text-gray-900' : 'text-gray-400'}`}>
+                <p className={`text-sm font-semibold ${index <= currentStep ? 'text-slate-900' : 'text-slate-400'}`}>
                   {step.label}
                 </p>
-                <p className="text-xs text-gray-500">{step.description}</p>
+                <p className="text-xs text-slate-400">{step.description}</p>
               </div>
             </div>
             {index < steps.length - 1 && (
-              <div className={`flex-1 h-0.5 mx-4 ${index < currentStep ? 'bg-indigo-600' : 'bg-gray-300'}`} />
+              <div className={`flex-1 h-0.5 mx-4 rounded ${index < currentStep ? 'bg-amber-500' : 'bg-stone-300'}`} />
             )}
           </li>
         ))}

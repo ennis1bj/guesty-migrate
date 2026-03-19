@@ -25,15 +25,15 @@ export default function ManifestCard({ manifest, selectedCategories, onToggleCat
           <button
             key={category}
             onClick={() => onToggleCategory(category)}
-            className={`p-4 rounded-xl border-2 text-left transition-all ${
+            className={`p-4 rounded-2xl border-2 text-left transition-all duration-200 ${
               selected
-                ? 'border-indigo-600 bg-indigo-50 shadow-sm'
-                : 'border-gray-200 bg-white hover:border-gray-300'
+                ? 'border-amber-500 bg-amber-50 shadow-sm'
+                : 'border-stone-200 bg-white hover:border-stone-300'
             }`}
           >
             <div className="flex items-center justify-between mb-2">
               <svg
-                className={`w-6 h-6 ${selected ? 'text-indigo-600' : 'text-gray-400'}`}
+                className={`w-6 h-6 ${selected ? 'text-amber-600' : 'text-slate-400'}`}
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -42,8 +42,8 @@ export default function ManifestCard({ manifest, selectedCategories, onToggleCat
                 <path strokeLinecap="round" strokeLinejoin="round" d={CATEGORY_ICONS[category] || CATEGORY_ICONS.tasks} />
               </svg>
               <div
-                className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
-                  selected ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300'
+                className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all duration-200 ${
+                  selected ? 'bg-amber-500 border-amber-500' : 'border-stone-300'
                 }`}
               >
                 {selected && (
@@ -57,8 +57,8 @@ export default function ManifestCard({ manifest, selectedCategories, onToggleCat
                 )}
               </div>
             </div>
-            <h3 className="text-lg font-semibold capitalize text-gray-900">{category}</h3>
-            <p className="text-2xl font-bold text-indigo-600">{count.toLocaleString()}</p>
+            <h3 className="text-lg font-bold capitalize text-slate-900">{category.replace(/_/g, ' ')}</h3>
+            <p className="text-2xl font-extrabold text-amber-500">{count.toLocaleString()}</p>
           </button>
         );
       })}
