@@ -195,7 +195,7 @@ router.get('/:id/status', async (req, res) => {
     }
 
     const logsResult = await pool.query(
-      'SELECT category, status, source_count, migrated_count, failed_count, error_details, created_at FROM migration_logs WHERE migration_id = $1 ORDER BY created_at ASC',
+      'SELECT category, status, source_count, migrated_count, failed_count, skipped_count, error_details, photos, created_at FROM migration_logs WHERE migration_id = $1 ORDER BY created_at ASC',
       [id]
     );
 
@@ -235,7 +235,7 @@ router.post('/:id/retry', async (req, res) => {
   try {
     const { id } = req.params;
     const migResult = await pool.query(
-      "SELECT * FROM migrations WHERE id = $1 AND user_id = $2 AND status IN ('failed','complete_with_errors')",
+      "SELECT * FROM migrations WHERE id = $1 AND user_id = $2 AND status IN ('failed', 'complete_with_errors')",
       [id, req.user.id]
     );
     if (migResult.rows.length === 0) {
