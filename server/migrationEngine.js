@@ -49,6 +49,11 @@ const CATEGORIES = {
     getAll: (client) => client.getAllOwners(),
     create: (client, data) => client.createOwner(data),
     idField: '_id',
+    transform: (item, maps) => {
+      const cleaned = stripFieldsDeep(item);
+      cleaned.sendInvitation = false;  // suppress portal invite email
+      return cleaned;
+    },
   },
   reservations: {
     getAll: (client) => client.getAllReservations(),
