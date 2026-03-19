@@ -250,21 +250,28 @@ export default function Migrate() {
           <p className="text-gray-600 mb-6">Select the categories you want to migrate.</p>
 
           <ManifestCard
-            manifest={manifest}
+            manifest={Object.fromEntries(
+              Object.entries(manifest).filter(([k]) => !['photos'].includes(k))
+            )}
             selectedCategories={selectedCategories}
             onToggleCategory={toggleCategory}
           />
 
           {manifest.photos !== undefined && (
-            <p className="text-sm text-gray-500 mt-1">
-              📷 {manifest.photos} total photos found across all listings
-            </p>
+            <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-2">
+              <span className="text-blue-600 text-lg">{"\uD83D\uDCF7"}</span>
+              <p className="text-sm text-blue-800">
+                <strong>{manifest.photos.toLocaleString()} photos</strong> found across
+                all listings — native listing photos will be migrated automatically.
+                Channel-connected listing photos re-sync when you reconnect channels.
+              </p>
+            </div>
           )}
 
           <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-            ⚠️ Channel-connected listings (Airbnb, Vrbo, Booking.com) — photos will
-            re-sync automatically when you reconnect channels to the destination account.
-            Only native/direct listing photos will be migrated.
+            {"\u26A0\uFE0F"} <strong>Before running:</strong> Disconnect all channels (Airbnb, Vrbo,
+            Booking.com) from the source account. Channel reservations cannot be
+            migrated and will be skipped automatically.
           </div>
 
           <div className="mt-8 p-4 bg-gray-50 rounded-xl flex items-center justify-between">
