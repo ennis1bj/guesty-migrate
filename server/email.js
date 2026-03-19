@@ -32,7 +32,22 @@ async function sendMigrationReport(to, migration) {
 
   const categoryRows = migration.diff_report
     ? Object.entries(migration.diff_report)
-        .map(([cat, data]) => `<tr><td style="padding:8px;border:1px solid #ddd">${cat}</td><td style="padding:8px;border:1px solid #ddd">${data.source}</td><td style="padding:8px;border:1px solid #ddd">${data.destination}</td><td style="padding:8px;border:1px solid #ddd">${data.match ? '✅' : '⚠️'}</td></tr>`)
+        .map(([cat, data]) => {
+          if (cat === 'photos') {
+            return `<tr>
+              <td style="padding:8px;border:1px solid #ddd">📷 Photos</td>
+              <td style="padding:8px;border:1px solid #ddd">${data.found ?? '-'} found</td>
+              <td style="padding:8px;border:1px solid #ddd">${data.migrated ?? '-'} migrated</td>
+              <td style="padding:8px;border:1px solid #ddd">${data.failed ? '⚠️ ' + data.failed + ' failed' : '✅'}</td>
+            </tr>`;
+          }
+          return `<tr>
+            <td style="padding:8px;border:1px solid #ddd">${cat}</td>
+            <td style="padding:8px;border:1px solid #ddd">${data.source}</td>
+            <td style="padding:8px;border:1px solid #ddd">${data.destination}</td>
+            <td style="padding:8px;border:1px solid #ddd">${data.match ? '✅' : '⚠️'}</td>
+          </tr>`;
+        })
         .join('')
     : '<tr><td colspan="4">No report available</td></tr>';
 
