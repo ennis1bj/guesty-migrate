@@ -1,5 +1,20 @@
+interface CategoryData {
+  source?: number;
+  destination?: number;
+  match?: boolean;
+  error?: string;
+  found?: number;
+  migrated?: number;
+  skipped_channel_managed?: number;
+  failed?: number;
+}
+
 interface DiffReportProps {
-  report: Record<string, { source: number; destination: number; match: boolean; error?: string }>;
+  report: Record<string, CategoryData>;
+}
+
+function isPhotoEntry(data: CategoryData): boolean {
+  return data.found !== undefined || data.migrated !== undefined;
 }
 
 export default function DiffReport({ report }: DiffReportProps) {
@@ -7,7 +22,10 @@ export default function DiffReport({ report }: DiffReportProps) {
     return <p className="text-gray-500 text-center py-8">No report data available.</p>;
   }
 
-  const allMatch = Object.values(report).every((r) => r.match);
+  const standardEntries = Object.entries(report).filter(([, data]) => !isPhotoEntry(data));
+  const photoEntry = report.photos && isPhotoEntry(report.photos) ? report.photos : null;
+
+  const allMatch = standardEntries.every(([, r]) => r.match);
 
   return (
     <div>
@@ -30,11 +48,11 @@ export default function DiffReport({ report }: DiffReportProps) {
             </tr>
           </thead>
           <tbody>
-            {Object.entries(report).map(([category, data]) => (
+            {standardEntries.map(([category, data]) => (
               <tr key={category} className="border-b hover:bg-gray-50">
                 <td className="px-4 py-3 text-sm font-medium text-gray-900 capitalize">{category}</td>
-                <td className="px-4 py-3 text-sm text-gray-600 text-right">{data.source.toLocaleString()}</td>
-                <td className="px-4 py-3 text-sm text-gray-600 text-right">{data.destination.toLocaleString()}</td>
+                <td className="px-4 py-3 text-sm text-gray-600 text-right">{(data.source ?? 0).toLocaleString()}</td>
+                <td className="px-4 py-3 text-sm text-gray-600 text-right">{(data.destination ?? 0).toLocaleString()}</td>
                 <td className="px-4 py-3 text-center">
                   {data.match ? (
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
@@ -51,6 +69,40 @@ export default function DiffReport({ report }: DiffReportProps) {
           </tbody>
         </table>
       </div>
+
+      {photoEntry && (
+        <div className="mt-6">
+          <h4 className="text-sm font-semibold text-gray-700 mb-3">Photo Migration</h4>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b">Category</th>
+                  <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700 border-b">Found</th>
+                  <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700 border-b">Migrated</th>
+                  <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700 border-b">Channel-Skipped</th>
+                  <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700 border-b">Failed</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-b hover:bg-gray-50">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900">Photos</td>
+                  <td className="px-4 py-3 text-sm text-gray-600 text-right">{(photoEntry.found ?? 0).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-sm text-gray-600 text-right">{(photoEntry.migrated ?? 0).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-sm text-gray-600 text-right">{(photoEntry.skipped_channel_managed ?? 0).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-sm text-gray-600 text-right">
+                    {(photoEntry.failed ?? 0) > 0 ? (
+                      <span className="text-red-600 font-medium">{(photoEntry.failed ?? 0).toLocaleString()}</span>
+                    ) : (
+                      (photoEntry.failed ?? 0).toLocaleString()
+                    )}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

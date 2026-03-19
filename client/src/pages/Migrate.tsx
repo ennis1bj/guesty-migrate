@@ -25,7 +25,15 @@ interface MigrationStatus {
   status: string;
   manifest: Record<string, number>;
   results: Record<string, { sourceCount: number; migratedCount: number; failedCount: number }> | null;
-  diff_report: Record<string, { source: number; destination: number; match: boolean }> | null;
+  diff_report: Record<string, {
+    source?: number;
+    destination?: number;
+    match?: boolean;
+    found?: number;
+    migrated?: number;
+    skipped_channel_managed?: number;
+    failed?: number;
+  }> | null;
   logs: Array<{
     category: string;
     status: string;
@@ -246,6 +254,18 @@ export default function Migrate() {
             selectedCategories={selectedCategories}
             onToggleCategory={toggleCategory}
           />
+
+          {manifest.photos !== undefined && (
+            <p className="text-sm text-gray-500 mt-1">
+              📷 {manifest.photos} total photos found across all listings
+            </p>
+          )}
+
+          <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+            ⚠️ Channel-connected listings (Airbnb, Vrbo, Booking.com) — photos will
+            re-sync automatically when you reconnect channels to the destination account.
+            Only native/direct listing photos will be migrated.
+          </div>
 
           <div className="mt-8 p-4 bg-gray-50 rounded-xl flex items-center justify-between">
             <div>
