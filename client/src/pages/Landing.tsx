@@ -24,9 +24,12 @@ const features = [
 ];
 
 const pricingTiers = [
-  { name: 'Starter', listings: '1 – 10', price: '$99', popular: false },
-  { name: 'Professional', listings: '11 – 50', price: '$299', popular: true },
-  { name: 'Enterprise', listings: '51+', price: '$599', popular: false },
+  { name: 'Starter',       listings: '1 – 10',    price: '$149',   popular: false },
+  { name: 'Growth',        listings: '11 – 50',   price: '$349',   popular: false },
+  { name: 'Professional',  listings: '51 – 150',  price: '$699',   popular: true },
+  { name: 'Business',      listings: '151 – 300', price: '$999',   popular: false },
+  { name: 'Enterprise',    listings: '301 – 500', price: '$1,499', popular: false },
+  { name: 'Enterprise+',   listings: '500+',      price: 'Custom', popular: false, isCustom: true },
 ];
 
 export default function Landing() {
@@ -89,10 +92,13 @@ export default function Landing() {
           <h2 className="text-3xl font-bold text-center text-gray-900 mb-4">
             Simple, Transparent Pricing
           </h2>
-          <p className="text-center text-gray-600 mb-12 max-w-2xl mx-auto">
+          <p className="text-center text-gray-600 mb-4 max-w-2xl mx-auto">
             Pay per migration based on your listing count. No subscriptions, no hidden fees.
           </p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl mx-auto">
+          <p className="text-center text-sm text-gray-500 mb-12 max-w-2xl mx-auto">
+            Prefer pay-per-listing? Choose the per-listing mode at checkout for graduated rates starting at $8/listing.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 max-w-5xl mx-auto">
             {pricingTiers.map((tier) => (
               <div
                 key={tier.name}
@@ -110,16 +116,25 @@ export default function Landing() {
                 <h3 className="text-xl font-bold text-gray-900 mb-2">{tier.name}</h3>
                 <p className="text-gray-500 mb-4">{tier.listings} listings</p>
                 <p className="text-4xl font-extrabold text-gray-900 mb-6">{tier.price}</p>
-                <Link
-                  to="/register"
-                  className={`block w-full py-3 rounded-lg font-semibold transition-colors ${
-                    tier.popular
-                      ? 'bg-indigo-600 text-white hover:bg-indigo-700'
-                      : 'bg-gray-100 text-gray-900 hover:bg-gray-200'
-                  }`}
-                >
-                  Get Started
-                </Link>
+                {tier.isCustom ? (
+                  <a
+                    href="mailto:support@guestymigrate.com?subject=Enterprise%20Migration%20Quote"
+                    className="block w-full py-3 rounded-lg font-semibold transition-colors bg-gray-100 text-gray-900 hover:bg-gray-200"
+                  >
+                    Contact Us
+                  </a>
+                ) : (
+                  <Link
+                    to="/register"
+                    className={`block w-full py-3 rounded-lg font-semibold transition-colors ${
+                      tier.popular
+                        ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                        : 'bg-gray-100 text-gray-900 hover:bg-gray-200'
+                    }`}
+                  >
+                    Get Started
+                  </Link>
+                )}
               </div>
             ))}
           </div>

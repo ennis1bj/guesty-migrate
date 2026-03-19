@@ -28,8 +28,16 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req, re
           [migrationId]
         );
 
-        await enqueueMigration(migrationId);
-        console.log(`Migration ${migrationId} paid and enqueued`);
+        // Check for priority processing add-on
+        const migResult = await pool.query(
+          'SELECT selected_addons FROM migrations WHERE id = $1',
+          [migrationId]
+        );
+        const addons = migResult.rows[0]?.selected_addons || [];
+        const priority = addons.includes('priority') ? 1 : 10;
+
+        await enqueueMigration(migrationId, { priority });
+        console.log(`Migration ${migrationId} paid and enqueued (priority=${priority})`);
       } catch (err) {
         console.error('Error processing payment for migration:', err);
         // Return 500 so Stripe retries the webhook instead of silently succeeding

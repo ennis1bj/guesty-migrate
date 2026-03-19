@@ -15,10 +15,29 @@ const STEPS = [
 
 const ALL_CATEGORIES = ['custom_fields', 'fees', 'taxes', 'listings', 'guests', 'owners', 'reservations', 'automations', 'tasks'];
 
+type PricingMode = 'flat_tier' | 'per_listing';
+type AddOnKey = 'priority' | 'support' | 'remigrate' | 'verify';
+
 interface Pricing {
   tier: string;
-  amountCents: number;
+  amountCents?: number;
+  perListingCents?: number;
+  requiresQuote?: boolean;
 }
+
+interface AddOnInfo {
+  key: AddOnKey;
+  name: string;
+  description: string;
+  priceCents: number;
+}
+
+const ADD_ONS: AddOnInfo[] = [
+  { key: 'priority',  name: 'Priority Processing',          description: 'Skip the queue — your migration runs first.',                              priceCents: 9900 },
+  { key: 'support',   name: 'Dedicated Support & Review',   description: 'A migration specialist reviews your setup and assists during the process.',  priceCents: 14900 },
+  { key: 'remigrate', name: 'Re-Migration Pass',            description: 'One free re-run within 30 days if you need to migrate again.',               priceCents: 7900 },
+  { key: 'verify',    name: 'Post-Migration Verify Call',   description: '30-minute video call to walk through your destination account.',             priceCents: 9900 },
+];
 
 interface MigrationStatus {
   id: string;
@@ -43,6 +62,21 @@ interface MigrationStatus {
   }>;
 }
 
+/**
+ * Compute per-listing graduated price (mirrors server logic).
+ *   Base: $79 + $8/listing (1-50) + $5/listing (51-200) + $3/listing (201+)
+ */
+function calculatePerListingCents(listingCount: number): number {
+  let total = 7900; // base
+  const t1 = Math.min(listingCount, 50);
+  total += t1 * 800;
+  const t2 = Math.min(Math.max(listingCount - 50, 0), 150);
+  total += t2 * 500;
+  const t3 = Math.max(listingCount - 200, 0);
+  total += t3 * 300;
+  return total;
+}
+
 export default function Migrate() {
   const [searchParams] = useSearchParams();
   const [currentStep, setCurrentStep] = useState(0);
@@ -59,12 +93,17 @@ export default function Migrate() {
   const [selectedCategories, setSelectedCategories] = useState<string[]>(ALL_CATEGORIES);
   const [pricing, setPricing] = useState<Pricing | null>(null);
 
+  // Step 3: Payment options
+  const [pricingMode, setPricingMode] = useState<PricingMode>('flat_tier');
+  const [selectedAddOns, setSelectedAddOns] = useState<AddOnKey[]>([]);
+
   // Step 4: Progress
   const [migrationStatus, setMigrationStatus] = useState<MigrationStatus | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [channelConfirmed, setChannelConfirmed] = useState(false);
+  const [showQuoteModal, setShowQuoteModal] = useState(false);
 
   // Handle returning from Stripe checkout
   useEffect(() => {
@@ -93,7 +132,7 @@ export default function Migrate() {
 
     pollStatus();
     let pollCount = 0;
-    const MAX_POLLS = 450; // ~30 minutes at 4s intervals
+    const MAX_POLLS = 450;
     const interval = setInterval(async () => {
       pollCount++;
       const status = await pollStatus();
@@ -131,11 +170,17 @@ export default function Migrate() {
 
   const handleCheckout = async () => {
     if (!migrationId) return;
+    if (pricing?.requiresQuote) {
+      setShowQuoteModal(true);
+      return;
+    }
     setError('');
     setLoading(true);
     try {
       const { data } = await api.post(`/migrations/${migrationId}/checkout`, {
         selectedCategories,
+        pricingMode,
+        addOns: selectedAddOns,
       });
       window.location.href = data.checkoutUrl;
     } catch (err: any) {
@@ -151,7 +196,26 @@ export default function Migrate() {
     );
   };
 
-  const formatPrice = (cents: number) => `$${(cents / 100).toFixed(0)}`;
+  const toggleAddOn = (addon: AddOnKey) => {
+    setSelectedAddOns((prev) =>
+      prev.includes(addon) ? prev.filter((a) => a !== addon) : [...prev, addon]
+    );
+  };
+
+  const formatPrice = (cents: number) => `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+
+  // Compute totals
+  const flatCents = pricing?.amountCents || 0;
+  const perListingCents = manifest ? calculatePerListingCents(manifest.listings) : 0;
+  const addonTotal = selectedAddOns.reduce((sum, key) => {
+    const a = ADD_ONS.find((ao) => ao.key === key);
+    return sum + (a?.priceCents || 0);
+  }, 0);
+  const baseCents = pricingMode === 'flat_tier' ? flatCents : perListingCents;
+  const grandTotal = baseCents + addonTotal;
+
+  // Best value badge
+  const flatIsBetter = flatCents <= perListingCents;
 
   const downloadReport = () => {
     if (!migrationStatus?.diff_report) return;
@@ -181,7 +245,32 @@ export default function Migrate() {
         </div>
       )}
 
-      {/* Step 1: Credentials */}
+      {/* ── Quote Modal (enterprise_plus) ──────────────────────────────── */}
+      {showQuoteModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8">
+            <h3 className="text-xl font-bold text-gray-900 mb-2">Custom Quote Required</h3>
+            <p className="text-gray-600 mb-4">
+              Accounts with 500+ listings require a custom migration plan. Our team will
+              assess your account and provide a tailored quote within 24 hours.
+            </p>
+            <a
+              href="mailto:support@guestymigrate.com?subject=Enterprise%20Migration%20Quote&body=I%20have%20500%2B%20listings%20and%20need%20a%20custom%20migration%20quote."
+              className="block w-full text-center bg-indigo-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors mb-3"
+            >
+              Contact Us for a Quote
+            </a>
+            <button
+              onClick={() => setShowQuoteModal(false)}
+              className="block w-full text-center text-gray-500 hover:text-gray-700 text-sm"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Step 1: Credentials ────────────────────────────────────────── */}
       {currentStep === 0 && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
           <h2 className="text-xl font-semibold text-gray-900 mb-6">Enter API Credentials</h2>
@@ -271,7 +360,7 @@ export default function Migrate() {
         </div>
       )}
 
-      {/* Step 2: Manifest & Selection */}
+      {/* ── Step 2: Manifest & Selection ───────────────────────────────── */}
       {currentStep === 1 && manifest && pricing && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
           <h2 className="text-xl font-semibold text-gray-900 mb-2">Source Account Data</h2>
@@ -307,39 +396,200 @@ export default function Migrate() {
           <div className="mt-8 p-4 bg-gray-50 rounded-xl flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-500">Migration Price</p>
-              <p className="text-3xl font-bold text-gray-900">{formatPrice(pricing.amountCents)}</p>
-              <p className="text-sm text-gray-500 capitalize">{pricing.tier} tier</p>
+              {pricing.requiresQuote ? (
+                <>
+                  <p className="text-2xl font-bold text-gray-900">Custom Quote</p>
+                  <p className="text-sm text-gray-500">500+ listings</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-3xl font-bold text-gray-900">from {formatPrice(Math.min(flatCents, perListingCents))}</p>
+                  <p className="text-sm text-gray-500 capitalize">{pricing.tier} tier</p>
+                </>
+              )}
             </div>
-            <button
-              onClick={() => setCurrentStep(2)}
-              disabled={selectedCategories.length === 0}
-              className="bg-indigo-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-            >
-              Continue to Payment
-            </button>
+            {pricing.requiresQuote ? (
+              <button
+                onClick={() => setShowQuoteModal(true)}
+                className="bg-indigo-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors"
+              >
+                Contact Us for a Quote
+              </button>
+            ) : (
+              <button
+                onClick={() => setCurrentStep(2)}
+                disabled={selectedCategories.length === 0}
+                className="bg-indigo-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+              >
+                Continue to Payment
+              </button>
+            )}
           </div>
         </div>
       )}
 
-      {/* Step 3: Payment */}
-      {currentStep === 2 && pricing && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 text-center">
-          <div className="max-w-md mx-auto">
+      {/* ── Step 3: Payment ────────────────────────────────────────────── */}
+      {currentStep === 2 && pricing && !pricing.requiresQuote && manifest && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
+          <div className="max-w-2xl mx-auto">
             <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <svg className="w-8 h-8 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
               </svg>
             </div>
-            <h2 className="text-xl font-semibold text-gray-900 mb-2">Ready to Migrate</h2>
-            <p className="text-gray-600 mb-6">
-              You'll be redirected to Stripe to complete your payment of{' '}
-              <strong>{formatPrice(pricing.amountCents)}</strong>.
-            </p>
-            <p className="text-sm text-gray-500 mb-6">
-              Migrating {selectedCategories.length} categories: {selectedCategories.join(', ')}
+            <h2 className="text-xl font-semibold text-gray-900 mb-2 text-center">Choose Your Pricing</h2>
+            <p className="text-gray-600 mb-8 text-center">
+              Select a pricing mode and any optional add-ons for your migration.
             </p>
 
-            <div className="mt-6 p-4 bg-gray-50 rounded-xl text-left">
+            {/* ── Pricing Mode Toggle ──────────────────────────────────── */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
+              {/* Flat Rate */}
+              <button
+                onClick={() => setPricingMode('flat_tier')}
+                className={`relative p-5 rounded-xl border-2 text-left transition-all ${
+                  pricingMode === 'flat_tier'
+                    ? 'border-indigo-600 bg-indigo-50 ring-1 ring-indigo-600'
+                    : 'border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                {flatIsBetter && (
+                  <span className="absolute -top-2.5 left-4 bg-green-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                    Best value
+                  </span>
+                )}
+                <div className="flex items-center gap-3 mb-2">
+                  <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                    pricingMode === 'flat_tier' ? 'border-indigo-600' : 'border-gray-300'
+                  }`}>
+                    {pricingMode === 'flat_tier' && <div className="w-2 h-2 rounded-full bg-indigo-600" />}
+                  </div>
+                  <span className="font-semibold text-gray-900">Flat Rate</span>
+                </div>
+                <p className="text-2xl font-bold text-gray-900 ml-7">{formatPrice(flatCents)}</p>
+                <p className="text-sm text-gray-500 ml-7 capitalize">{pricing.tier} tier — {manifest.listings} listings</p>
+              </button>
+
+              {/* Per Listing */}
+              <button
+                onClick={() => setPricingMode('per_listing')}
+                className={`relative p-5 rounded-xl border-2 text-left transition-all ${
+                  pricingMode === 'per_listing'
+                    ? 'border-indigo-600 bg-indigo-50 ring-1 ring-indigo-600'
+                    : 'border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                {!flatIsBetter && (
+                  <span className="absolute -top-2.5 left-4 bg-green-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                    Best value
+                  </span>
+                )}
+                <div className="flex items-center gap-3 mb-2">
+                  <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                    pricingMode === 'per_listing' ? 'border-indigo-600' : 'border-gray-300'
+                  }`}>
+                    {pricingMode === 'per_listing' && <div className="w-2 h-2 rounded-full bg-indigo-600" />}
+                  </div>
+                  <span className="font-semibold text-gray-900">Per Listing</span>
+                </div>
+                <p className="text-2xl font-bold text-gray-900 ml-7">{formatPrice(perListingCents)}</p>
+                <p className="text-sm text-gray-500 ml-7">$79 base + graduated per-listing rate</p>
+              </button>
+            </div>
+
+            {/* ── Per-listing rate breakdown ────────────────────────────── */}
+            {pricingMode === 'per_listing' && (
+              <div className="mb-8 p-4 bg-gray-50 rounded-xl text-sm">
+                <h4 className="font-semibold text-gray-700 mb-2">Rate Breakdown</h4>
+                <table className="w-full text-left">
+                  <tbody className="text-gray-600">
+                    <tr><td className="py-0.5">Base fee</td><td className="text-right font-medium">$79.00</td></tr>
+                    {manifest.listings > 0 && (
+                      <tr>
+                        <td className="py-0.5">Listings 1–{Math.min(manifest.listings, 50)} @ $8.00</td>
+                        <td className="text-right font-medium">${(Math.min(manifest.listings, 50) * 8).toFixed(2)}</td>
+                      </tr>
+                    )}
+                    {manifest.listings > 50 && (
+                      <tr>
+                        <td className="py-0.5">Listings 51–{Math.min(manifest.listings, 200)} @ $5.00</td>
+                        <td className="text-right font-medium">${(Math.min(Math.max(manifest.listings - 50, 0), 150) * 5).toFixed(2)}</td>
+                      </tr>
+                    )}
+                    {manifest.listings > 200 && (
+                      <tr>
+                        <td className="py-0.5">Listings 201–{manifest.listings} @ $3.00</td>
+                        <td className="text-right font-medium">${(Math.max(manifest.listings - 200, 0) * 3).toFixed(2)}</td>
+                      </tr>
+                    )}
+                    <tr className="border-t border-gray-200">
+                      <td className="pt-2 font-semibold text-gray-900">Total</td>
+                      <td className="pt-2 text-right font-bold text-gray-900">{formatPrice(perListingCents)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* ── Optional Add-ons ─────────────────────────────────────── */}
+            <div className="mb-8">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Optional Add-ons</h3>
+              <div className="space-y-3">
+                {ADD_ONS.map((addon) => (
+                  <label
+                    key={addon.key}
+                    className={`flex items-start gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                      selectedAddOns.includes(addon.key)
+                        ? 'border-indigo-600 bg-indigo-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedAddOns.includes(addon.key)}
+                      onChange={() => toggleAddOn(addon.key)}
+                      className="mt-1 w-4 h-4 text-indigo-600 rounded"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-gray-900">{addon.name}</span>
+                        <span className="font-bold text-gray-900">{formatPrice(addon.priceCents)}</span>
+                      </div>
+                      <p className="text-sm text-gray-500 mt-0.5">{addon.description}</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Order Summary ─────────────────────────────────────────── */}
+            <div className="p-4 bg-gray-50 rounded-xl mb-6">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">Order Summary</h3>
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">
+                    {pricingMode === 'flat_tier' ? `${pricing.tier} flat rate` : `Per-listing (${manifest.listings} listings)`}
+                  </span>
+                  <span className="font-medium text-gray-900">{formatPrice(baseCents)}</span>
+                </div>
+                {selectedAddOns.map((key) => {
+                  const a = ADD_ONS.find((ao) => ao.key === key);
+                  return a ? (
+                    <div key={key} className="flex justify-between">
+                      <span className="text-gray-600">{a.name}</span>
+                      <span className="font-medium text-gray-900">{formatPrice(a.priceCents)}</span>
+                    </div>
+                  ) : null;
+                })}
+                <div className="flex justify-between pt-2 border-t border-gray-200">
+                  <span className="font-semibold text-gray-900">Total</span>
+                  <span className="font-bold text-lg text-gray-900">{formatPrice(grandTotal)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* ── What's included ───────────────────────────────────────── */}
+            <div className="p-4 bg-gray-50 rounded-xl text-left mb-6">
               <h3 className="text-sm font-semibold text-gray-700 mb-2">What's included</h3>
               <ul className="text-sm text-gray-600 space-y-1">
                 <li>{"\u2705"} Listings, guests, owners, reservations (direct only)</li>
@@ -359,12 +609,16 @@ export default function Migrate() {
               </ul>
             </div>
 
+            <p className="text-sm text-gray-500 mb-6 text-center">
+              Migrating {selectedCategories.length} categories: {selectedCategories.join(', ')}
+            </p>
+
             <button
               onClick={handleCheckout}
               disabled={loading}
-              className="bg-indigo-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+              className="w-full bg-indigo-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
             >
-              {loading ? 'Redirecting...' : `Pay ${formatPrice(pricing.amountCents)} & Start Migration`}
+              {loading ? 'Redirecting...' : `Pay ${formatPrice(grandTotal)} & Start Migration`}
             </button>
             <button
               onClick={() => setCurrentStep(1)}
@@ -376,7 +630,7 @@ export default function Migrate() {
         </div>
       )}
 
-      {/* Step 4: Progress */}
+      {/* ── Step 4: Progress ───────────────────────────────────────────── */}
       {currentStep === 3 && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
           <div className="flex items-center justify-between mb-6">

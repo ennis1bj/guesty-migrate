@@ -33,7 +33,7 @@ function initQueue() {
     migrationWorker = new Worker(
       'migrations',
       async (job) => {
-        console.log(`Processing migration job ${job.data.migrationId}`);
+        console.log(`Processing migration job ${job.data.migrationId} (priority=${job.opts?.priority || 'default'})`);
         await runMigration(job.data.migrationId);
       },
       { connection, concurrency: 2 }
@@ -56,13 +56,19 @@ function initQueue() {
   }
 }
 
-async function enqueueMigration(migrationId) {
+async function enqueueMigration(migrationId, options = {}) {
+  const priority = options.priority || 10;
+
   if (useRedis && migrationQueue) {
-    await migrationQueue.add('run-migration', { migrationId });
-    console.log(`Enqueued migration ${migrationId} to BullMQ`);
+    await migrationQueue.add(
+      'run-migration',
+      { migrationId },
+      { priority }
+    );
+    console.log(`Enqueued migration ${migrationId} to BullMQ (priority=${priority})`);
   } else {
     // In-process fallback — run async, don't block
-    console.log(`Running migration ${migrationId} in-process`);
+    console.log(`Running migration ${migrationId} in-process (priority=${priority})`);
     setImmediate(() => {
       runMigration(migrationId).catch((err) => {
         console.error(`In-process migration ${migrationId} failed:`, err);

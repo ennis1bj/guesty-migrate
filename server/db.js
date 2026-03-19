@@ -73,6 +73,15 @@ const migrate = async () => {
       );
     `);
 
+    // ── New columns for three-layer pricing ──────────────────────────────
+    await client.query(`
+      ALTER TABLE migrations ADD COLUMN IF NOT EXISTS selected_addons JSONB DEFAULT '[]';
+    `);
+
+    await client.query(`
+      ALTER TABLE migrations ADD COLUMN IF NOT EXISTS pricing_mode TEXT DEFAULT 'flat_tier';
+    `);
+
     console.log('Database migrations completed successfully');
   } finally {
     client.release();
