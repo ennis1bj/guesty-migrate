@@ -92,10 +92,16 @@ export default function Migrate() {
     if (currentStep !== 3 || !migrationId) return;
 
     pollStatus();
+    let pollCount = 0;
+    const MAX_POLLS = 450; // ~30 minutes at 4s intervals
     const interval = setInterval(async () => {
+      pollCount++;
       const status = await pollStatus();
       if (status === 'complete' || status === 'complete_with_errors' || status === 'failed') {
         clearInterval(interval);
+      } else if (pollCount >= MAX_POLLS) {
+        clearInterval(interval);
+        setError('Status polling timed out after 30 minutes. Your migration may still be running — check back on the Dashboard.');
       }
     }, 4000);
 
