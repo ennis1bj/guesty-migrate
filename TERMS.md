@@ -37,7 +37,7 @@ GuestyMigrate is a self-serve data migration tool that transfers data between Gu
 
 ## 7. Limitations
 
-- The Service migrates data categories as described in the documentation: listings, guests, owners, reservations (direct/manual only), automations, tasks, custom fields, fees, taxes, photos, and calendar blocks.
+- The Service migrates data categories as described in the documentation: listings (including complex/MTL parent-child hierarchies), guests, owners, reservations (direct/manual only), automations, tasks, custom fields, rate strategies, fees, taxes, saved replies, photos, and calendar blocks.
 - Channel-managed reservations (Airbnb, Vrbo, Booking.com, etc.) are not migrated and must be re-synced by reconnecting channels.
 - Task assignees are not remapped between accounts.
 - The Service does not guarantee 100% data fidelity due to Guesty API limitations.

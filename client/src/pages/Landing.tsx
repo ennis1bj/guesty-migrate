@@ -6,7 +6,7 @@ import { Link } from 'react-router-dom';
 const features = [
   {
     title: 'Listings & Photos',
-    description: 'Property configurations, details, and native listing photos uploaded to the destination.',
+    description: 'Property configurations, details, photos, and complex (MTL) parent-child hierarchies — all preserved.',
     icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6',
   },
   {
@@ -33,6 +33,16 @@ const features = [
     title: 'Calendar Blocks',
     description: 'Manual availability blocks transferred per listing to keep your calendars in sync.',
     icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2',
+  },
+  {
+    title: 'Rate Strategies',
+    description: 'Pricing rules, seasonal rates, and base pricing configurations migrated with full fidelity.',
+    icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+  },
+  {
+    title: 'Saved Replies',
+    description: 'Message templates migrated with listing-scoped remapping so your canned responses work instantly.',
+    icon: 'M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z',
   },
 ];
 
@@ -101,7 +111,7 @@ const faqs = [
   },
   {
     q: 'Is my data secure?',
-    a: 'Absolutely. Your API credentials are encrypted with AES-256 at rest and never stored in plain text. We connect to Guesty via their official Open API over HTTPS. Credentials are deleted after migration completes.',
+    a: 'Absolutely. All API credentials — Client IDs, Client Secrets, and OAuth tokens — are encrypted with AES-256 at rest and never stored in plain text. We connect to Guesty via their official Open API over HTTPS. You can also export or delete all your data at any time via your account settings.',
   },
   {
     q: 'What if something goes wrong?',
@@ -142,8 +152,8 @@ export default function Landing() {
           </h1>
 
           <p className="text-lg sm:text-xl text-slate-300 max-w-3xl mx-auto mb-10 leading-relaxed">
-            Transfer listings, reservations, guests, photos, automations, and 11 data categories
-            between Guesty accounts — fully automated with a verification report.
+            Transfer listings, reservations, guests, photos, rate strategies, saved replies, and 11 data categories
+            between Guesty accounts — fully automated with complex listing support and a verification report.
           </p>
 
           <div className="flex flex-col sm:flex-row justify-center gap-4">

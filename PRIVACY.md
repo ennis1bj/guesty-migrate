@@ -16,8 +16,8 @@ GuestyMigrate is not affiliated with Guesty Inc.
 
 ### API Credentials
 - Guesty Open API Client IDs and Client Secrets for source and destination accounts
-- Client Secrets are encrypted at rest using AES-256-CBC encryption
-- OAuth access tokens are cached temporarily for API communication
+- All credentials (Client IDs, Client Secrets, and cached OAuth access tokens) are encrypted at rest using AES-256-CBC encryption
+- OAuth access tokens are cached temporarily for API communication and encrypted while cached
 
 ### Migration Data
 - Migration status, configuration, and logs
@@ -60,7 +60,14 @@ You have the right to:
 - **Portability**: Request your data in a machine-readable format.
 - **Objection**: Object to processing of your personal data.
 
-To exercise any of these rights, contact us at privacy@guestymigrate.com.
+### Self-Serve Data Rights
+
+You can exercise your access and deletion rights directly through the application:
+
+- **Data Export**: `GET /api/auth/export` — download all your account data in JSON format (requires authentication).
+- **Account Deletion**: `DELETE /api/auth/account` — permanently delete your account and all associated data, including migrations, credentials, and logs (requires authentication).
+
+For any other requests, contact us at privacy@guestymigrate.com.
 
 ## 7. Third-Party Services
 
