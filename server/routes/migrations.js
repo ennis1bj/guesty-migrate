@@ -224,6 +224,30 @@ router.get('/:id/report', async (req, res) => {
   }
 });
 
+// POST /api/migrations/:id/retry
+router.post('/:id/retry', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const migResult = await pool.query(
+      "SELECT * FROM migrations WHERE id = $1 AND user_id = $2 AND status IN ('failed','complete_with_errors')",
+      [id, req.user.id]
+    );
+    if (migResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Migration not found or not retryable' });
+    }
+    await pool.query(
+      "UPDATE migrations SET status = 'paid', error_message = NULL WHERE id = $1",
+      [id]
+    );
+    const { enqueueMigration } = require('../queue');
+    await enqueueMigration(id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Retry error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // GET /api/migrations — list user's migrations
 router.get('/', async (req, res) => {
   try {

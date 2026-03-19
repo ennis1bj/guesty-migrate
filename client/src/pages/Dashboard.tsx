@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import api from '../api';
 
 interface Migration {
@@ -23,8 +23,18 @@ const statusStyles: Record<string, string> = {
 };
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [migrations, setMigrations] = useState<Migration[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const handleRetry = async (migrationId: string) => {
+    try {
+      await api.post(`/migrations/${migrationId}/retry`);
+      navigate(`/migrate?step=progress&migrationId=${migrationId}`);
+    } catch (err) {
+      console.error('Retry failed:', err);
+    }
+  };
 
   useEffect(() => {
     api
@@ -95,12 +105,22 @@ export default function Dashboard() {
                     })}
                   </span>
                 </div>
-                <Link
-                  to={`/migrate?step=progress&migrationId=${m.id}`}
-                  className="text-indigo-600 hover:text-indigo-700 text-sm font-medium"
-                >
-                  View Details
-                </Link>
+                <div className="flex items-center">
+                  {m.status === 'failed' && (
+                    <button
+                      onClick={() => handleRetry(m.id)}
+                      className="text-sm text-indigo-600 hover:underline mr-4"
+                    >
+                      Retry
+                    </button>
+                  )}
+                  <Link
+                    to={`/migrate?step=progress&migrationId=${m.id}`}
+                    className="text-indigo-600 hover:text-indigo-700 text-sm font-medium"
+                  >
+                    View Details
+                  </Link>
+                </div>
               </div>
 
               <p className="text-sm text-gray-500 mb-3 font-mono">{m.id}</p>
