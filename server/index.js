@@ -5,7 +5,7 @@ const cors = require('cors');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
 const { pool, migrate } = require('./db');
-const { initQueue } = require('./queue');
+const { initQueue, recoverStuckMigrations } = require('./queue');
 
 const authRoutes = require('./routes/auth');
 const migrationRoutes = require('./routes/migrations');
@@ -56,6 +56,9 @@ async function start() {
     // Run database migrations
     await migrate();
     console.log('Database ready');
+
+    // Recover any stuck migrations from before restart
+    await recoverStuckMigrations();
 
     // Initialize job queue
     initQueue();

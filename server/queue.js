@@ -71,4 +71,23 @@ async function enqueueMigration(migrationId) {
   }
 }
 
-module.exports = { initQueue, enqueueMigration };
+async function recoverStuckMigrations() {
+  try {
+    const { pool } = require('./db');
+    const result = await pool.query(
+      "SELECT id FROM migrations WHERE status = 'running' AND created_at < NOW() - INTERVAL '1 hour'"
+    );
+    for (const row of result.rows) {
+      console.log(`Recovering stuck migration ${row.id}`);
+      await pool.query(
+        "UPDATE migrations SET status = 'failed', error_message = 'Server restarted during migration' WHERE id = $1",
+        [row.id]
+      );
+    }
+    console.log(`Recovered ${result.rows.length} stuck migrations`);
+  } catch (err) {
+    console.error('Failed to recover stuck migrations:', err.message);
+  }
+}
+
+module.exports = { initQueue, enqueueMigration, recoverStuckMigrations };
