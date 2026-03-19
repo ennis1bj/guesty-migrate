@@ -3,6 +3,18 @@ const { decrypt } = require('./encryption');
 const GuestyClient = require('./guestyClient');
 const { sendMigrationReport } = require('./email');
 
+function getCategoryPath(category) {
+  const paths = {
+    listings:    '/listings',
+    reservations:'/reservations',
+    guests:      '/guests',
+    owners:      '/owners',
+    automations: '/automations',
+    tasks:       '/tasks-open-api/tasks',
+  };
+  return paths[category] || `/${category}`;
+}
+
 const STRIP_FIELDS = ['_id', 'accountId', 'createdAt', 'updatedAt', 'channelListingId', 'importedAt'];
 
 function stripFields(obj) {
@@ -207,19 +219,23 @@ async function runMigration(migrationId) {
     }
   }
 
-  // Verification: compare counts
+  // Verification: compare counts (count-only, no re-fetching)
   const diffReport = {};
   for (const category of selectedCategories) {
     const categoryDef = CATEGORIES[category];
     if (!categoryDef) continue;
 
     try {
-      const sourceItems = await categoryDef.getAll(sourceClient);
-      const destItems = await categoryDef.getAll(destClient);
+      const sourcePath = getCategoryPath(category);
+      const destPath   = getCategoryPath(category);
+      const [sourceCount, destCount] = await Promise.all([
+        sourceClient.getCount(sourcePath),
+        destClient.getCount(destPath),
+      ]);
       diffReport[category] = {
-        source: sourceItems.length,
-        destination: destItems.length,
-        match: sourceItems.length === destItems.length,
+        source: sourceCount,
+        destination: destCount,
+        match: sourceCount === destCount,
       };
     } catch (err) {
       diffReport[category] = {
