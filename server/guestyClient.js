@@ -116,11 +116,20 @@ class GuestyClient {
 
   async getCount(path) {
     try {
-      const data = await this.request('GET', `${path}?limit=1`);
-      return data.count || data.total || (data.results ? data.results.length : 0);
+      const data = await this.request('GET', `${path}?skip=0&limit=1`);
+      if (typeof data.count === 'number') return data.count;
+      if (typeof data.total === 'number') return data.total;
+      // Fallback: paginate all and count
+      const all = await this.getAllPaginated(path, 'results');
+      return all.length;
     } catch {
       return 0;
     }
+  }
+
+  async getCountAndAll(path) {
+    const items = await this.getAllPaginated(path, 'results');
+    return { items, count: items.length };
   }
 
   async createListing(data) {
