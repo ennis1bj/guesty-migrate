@@ -1,4 +1,5 @@
 const axios = require('axios');
+const FormData = require('form-data');
 const { pool } = require('./db');
 
 const BASE_URL = 'https://open-api.guesty.com/v1';
@@ -144,6 +145,46 @@ class GuestyClient {
 
   async createTask(data) {
     return this.request('POST', '/tasks-open-api/tasks', data);
+  }
+
+  async uploadListingPhoto(listingId, photoUrl) {
+    // Download the photo binary
+    const downloadResponse = await axios.get(photoUrl, {
+      responseType: 'arraybuffer',
+      timeout: 15000,
+    });
+
+    const buffer = Buffer.from(downloadResponse.data);
+
+    // Build multipart form
+    const form = new FormData();
+    form.append('file', buffer, {
+      filename: 'photo.jpg',
+      contentType: downloadResponse.headers['content-type'] || 'image/jpeg',
+    });
+
+    const token = await this.getAccessToken();
+    const response = await axios.post(
+      `${BASE_URL}/listings/${listingId}/pictures/upload`,
+      form,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...form.getHeaders(),
+        },
+      }
+    );
+
+    return response.data;
+  }
+
+  isChannelListing(listing) {
+    if (!Array.isArray(listing.integrations) || listing.integrations.length === 0) {
+      return false;
+    }
+    return listing.integrations.some(
+      (i) => i.channelName || i.platform || i.channel
+    );
   }
 }
 
