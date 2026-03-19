@@ -308,6 +308,27 @@ export default function Migrate() {
             <p className="text-sm text-gray-500 mb-6">
               Migrating {selectedCategories.length} categories: {selectedCategories.join(', ')}
             </p>
+
+            <div className="mt-6 p-4 bg-gray-50 rounded-xl text-left">
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">What's included</h3>
+              <ul className="text-sm text-gray-600 space-y-1">
+                <li>{"\u2705"} Listings, guests, owners, reservations (direct only)</li>
+                <li>{"\u2705"} Automations and tasks</li>
+                <li>{"\u2705"} Custom fields, fees, and taxes</li>
+                <li>{"\u2705"} Native listing photos</li>
+                <li>{"\u2705"} Calendar blocks</li>
+                <li>{"\u2705"} Verification report emailed on completion</li>
+              </ul>
+              <h3 className="text-sm font-semibold text-gray-700 mt-4 mb-2">What's not included</h3>
+              <ul className="text-sm text-gray-600 space-y-1">
+                <li>{"\u26A0\uFE0F"} Channel reservations (Airbnb, Vrbo, Booking.com) — re-sync via channel reconnect</li>
+                <li>{"\u26A0\uFE0F"} Airbnb/Vrbo reviews — tied to the channel listing, not portable</li>
+                <li>{"\u26A0\uFE0F"} Task assignees — tasks are migrated unassigned; reassign after migration</li>
+                <li>{"\u26A0\uFE0F"} Direct booking website — must be rebuilt in the destination account</li>
+                <li>{"\u26A0\uFE0F"} Marketplace integrations — must be reconnected after migration</li>
+              </ul>
+            </div>
+
             <button
               onClick={handleCheckout}
               disabled={loading}
