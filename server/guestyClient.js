@@ -90,6 +90,14 @@ class GuestyClient {
     return items;
   }
 
+  async getAllCustomFields() {
+    return this.getAllPaginated('/custom-fields', 'results');
+  }
+
+  async createCustomField(data) {
+    return this.request('POST', '/custom-fields', data);
+  }
+
   async getAllListings() {
     return this.getAllPaginated('/listings', 'results');
   }

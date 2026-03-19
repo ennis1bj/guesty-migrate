@@ -29,7 +29,8 @@ router.post('/preflight', async (req, res) => {
       await sourceClient.getAccessToken();
 
       // Fetch full listings (needed for photo count) and counts for the rest
-      const [allListings, reservations, guests, owners, automations, tasks] = await Promise.all([
+      const [customFields, allListings, reservations, guests, owners, automations, tasks] = await Promise.all([
+        sourceClient.getCount('/custom-fields'),
         sourceClient.getAllListings(),
         sourceClient.getCount('/reservations'),
         sourceClient.getCount('/guests'),
@@ -43,6 +44,7 @@ router.post('/preflight', async (req, res) => {
       );
 
       manifest = {
+        custom_fields: customFields,
         listings: allListings.length,
         reservations,
         guests,
@@ -164,7 +166,7 @@ router.post('/:id/checkout', async (req, res) => {
 
     await pool.query(
       'UPDATE migrations SET stripe_session_id = $1, selected_categories = $2 WHERE id = $3',
-      [session.id, selectedCategories || ['listings', 'guests', 'owners', 'reservations', 'automations', 'tasks'], id]
+      [session.id, selectedCategories || ['custom_fields', 'listings', 'guests', 'owners', 'reservations', 'automations', 'tasks'], id]
     );
 
     res.json({ checkoutUrl: session.url });

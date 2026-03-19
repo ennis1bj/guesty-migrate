@@ -5,12 +5,15 @@ const { sendMigrationReport } = require('./email');
 
 function getCategoryPath(category) {
   const paths = {
-    listings:    '/listings',
-    reservations:'/reservations',
-    guests:      '/guests',
-    owners:      '/owners',
-    automations: '/automations',
-    tasks:       '/tasks-open-api/tasks',
+    custom_fields: '/custom-fields',
+    listings:      '/listings',
+    reservations:  '/reservations',
+    guests:        '/guests',
+    owners:        '/owners',
+    automations:   '/automations',
+    tasks:         '/tasks-open-api/tasks',
+    fees:          '/fees',
+    taxes:         '/taxes',
   };
   return paths[category] || `/${category}`;
 }
@@ -35,6 +38,11 @@ function stripFieldsDeep(obj) {
 }
 
 const CATEGORIES = {
+  custom_fields: {
+    getAll: (client) => client.getAllCustomFields(),
+    create: (client, data) => client.createCustomField(data),
+    idField: '_id',
+  },
   listings: {
     getAll: (client) => client.getAllListings(),
     create: (client, data) => client.createListing(data),
@@ -125,7 +133,7 @@ const CATEGORIES = {
 };
 
 // Strict migration order for dependency resolution
-const MIGRATION_ORDER = ['listings', 'guests', 'owners', 'reservations', 'automations', 'tasks'];
+const MIGRATION_ORDER = ['custom_fields', 'listings', 'guests', 'owners', 'reservations', 'automations', 'tasks'];
 
 async function updateStatus(migrationId, status, extra = {}) {
   const sets = ['status = $2'];
