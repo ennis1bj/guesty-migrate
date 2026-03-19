@@ -1,5 +1,14 @@
 require('dotenv').config();
 
+// Validate required environment variables at startup
+const REQUIRED_ENV = ['DATABASE_URL', 'JWT_SECRET', 'ENCRYPTION_KEY', 'STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY'];
+const missing = REQUIRED_ENV.filter((key) => !process.env[key]);
+if (missing.length > 0) {
+  console.error(`Missing required environment variables: ${missing.join(', ')}`);
+  console.error('See .env.example for required values.');
+  process.exit(1);
+}
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
