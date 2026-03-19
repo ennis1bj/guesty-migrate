@@ -227,6 +227,34 @@ class GuestyClient {
     return response.data;
   }
 
+  async getListingCalendarBlocks(listingId) {
+    try {
+      // Fetch the next 2 years of calendar blocks
+      const today = new Date().toISOString().split('T')[0];
+      const future = new Date(Date.now() + 730 * 24 * 60 * 60 * 1000)
+        .toISOString().split('T')[0];
+      const data = await this.request(
+        'GET',
+        `/listings/${listingId}/calendar?startDate=${today}&endDate=${future}`
+      );
+      // Return only blocked days (status === 'unavailable' with no reservation)
+      const days = data.days || data.results || data || [];
+      return days.filter(d =>
+        (d.status === 'unavailable' || d.status === 'blocked') && !d.reservationId
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  async blockListingCalendar(listingId, startDate, endDate, note = '') {
+    return this.request('POST', `/listings/${listingId}/calendar/block`, {
+      startDate,
+      endDate,
+      note,
+    });
+  }
+
   isChannelListing(listing) {
     return Array.isArray(listing.integrations) &&
            listing.integrations.some(i => i && (i.channelName || i.platform || i.channel));

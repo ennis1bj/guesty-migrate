@@ -37,6 +37,33 @@ function stripFieldsDeep(obj) {
   return obj;
 }
 
+function groupContiguousDays(days) {
+  if (!days || days.length === 0) return [];
+  const sorted = [...days].sort((a, b) =>
+    new Date(a.date) - new Date(b.date)
+  );
+  const ranges = [];
+  let start = sorted[0].date;
+  let end = sorted[0].date;
+  let note = sorted[0].note || '';
+
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = new Date(end);
+    const curr = new Date(sorted[i].date);
+    const diff = (curr - prev) / (1000 * 60 * 60 * 24);
+    if (diff === 1) {
+      end = sorted[i].date;
+    } else {
+      ranges.push({ start, end, note });
+      start = sorted[i].date;
+      end = sorted[i].date;
+      note = sorted[i].note || '';
+    }
+  }
+  ranges.push({ start, end, note });
+  return ranges;
+}
+
 const CATEGORIES = {
   custom_fields: {
     getAll: (client) => client.getAllCustomFields(),
@@ -297,6 +324,29 @@ async function runMigration(migrationId) {
             totalPhotos.migrated += photoStats.migrated;
             totalPhotos.skipped += photoStats.skipped;
             totalPhotos.failed += photoStats.failed;
+
+            // Calendar block migration
+            try {
+              const blocks = await sourceClient.getListingCalendarBlocks(sourceId);
+              if (blocks.length > 0) {
+                const ranges = groupContiguousDays(blocks);
+                for (const range of ranges) {
+                  try {
+                    await destClient.blockListingCalendar(newId, range.start, range.end, range.note);
+                  } catch (blockErr) {
+                    // Non-fatal — log but continue
+                    errors.push({
+                      sourceId,
+                      type: 'calendar_block',
+                      range,
+                      error: blockErr.message,
+                    });
+                  }
+                }
+              }
+            } catch (calErr) {
+              // Non-fatal
+            }
           }
         } catch (err) {
           if (category === 'guests' && err.response?.status === 409) {
