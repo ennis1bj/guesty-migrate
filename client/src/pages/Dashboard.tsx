@@ -106,10 +106,11 @@ export default function Dashboard() {
                   </span>
                 </div>
                 <div className="flex items-center">
-                  {m.status === 'failed' && (
+                  {(m.status === 'failed' || m.status === 'complete_with_errors') && (
                     <button
                       onClick={() => handleRetry(m.id)}
                       className="text-sm text-indigo-600 hover:underline mr-4"
+                      title="Re-run the migration. Only categories that were not previously completed will be retried. You will not be charged again."
                     >
                       Retry
                     </button>
