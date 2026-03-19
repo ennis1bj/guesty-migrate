@@ -6,12 +6,17 @@ Self-serve migration tool for transferring data between Guesty.com property mana
 
 GuestyMigrate lets property managers migrate all their data from one Guesty account to another — fully automated. It handles:
 
-- **Listings** — property configurations and details
-- **Guests** — guest profiles and contact information
+- **Custom Fields** — custom field definitions
+- **Fees** — fee structures
+- **Taxes** — tax configurations
+- **Listings** — property configurations, details, and photos
+- **Guests** — guest profiles and contact information (with 409 deduplication)
 - **Owners** — property owner records
-- **Reservations** — bookings with listing and guest ID remapping
-- **Automations** — workflow automation rules
-- **Tasks** — task assignments with listing ID remapping
+- **Reservations** — direct/manual bookings with listing and guest ID remapping (channel reservations are skipped)
+- **Automations** — workflow automation rules with listing ID remapping
+- **Tasks** — task assignments with listing ID remapping (created unassigned)
+- **Photos** — native listing photos uploaded to destination (channel-managed photos are skipped)
+- **Calendar Blocks** — manual availability blocks transferred per listing
 
 The migration engine respects dependency ordering (listings before reservations), handles API rate limits, recovers from partial failures, and produces a verification diff report when complete.
 
@@ -115,6 +120,7 @@ Express serves the built frontend from `client/dist` for all non-API routes.
 | `SENDGRID_API_KEY` | SendGrid API key for email (optional) |
 | `REDIS_URL` | Redis connection URL (optional) |
 | `FRONTEND_URL` | Frontend URL for CORS and redirects |
+| `FROM_EMAIL` | Sender email for migration reports (default: noreply@guestymigrate.com) |
 
 ## Configuring Stripe
 
@@ -143,6 +149,11 @@ Express serves the built frontend from `client/dist` for all non-API routes.
 
 API documentation: [Guesty Open API Docs](https://open-api.guesty.com/api)
 
+## Legal
+
+- [Terms of Service](TERMS.md)
+- [Privacy Policy](PRIVACY.md)
+
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE) for details.
