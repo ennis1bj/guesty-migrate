@@ -1,12 +1,17 @@
 require('dotenv').config();
 
 // Validate required environment variables at startup
-const REQUIRED_ENV = ['DATABASE_URL', 'JWT_SECRET', 'ENCRYPTION_KEY', 'STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY', 'STRIPE_WEBHOOK_SECRET'];
+const REQUIRED_ENV = ['DATABASE_URL', 'JWT_SECRET', 'ENCRYPTION_KEY'];
+const OPTIONAL_ENV = ['STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY', 'STRIPE_WEBHOOK_SECRET'];
 const missing = REQUIRED_ENV.filter((key) => !process.env[key]);
 if (missing.length > 0) {
   console.error(`Missing required environment variables: ${missing.join(', ')}`);
   console.error('See .env.example for required values.');
   process.exit(1);
+}
+const missingOptional = OPTIONAL_ENV.filter((key) => !process.env[key]);
+if (missingOptional.length > 0) {
+  console.warn(`Optional environment variables not set (some features may be unavailable): ${missingOptional.join(', ')}`);
 }
 
 const express = require('express');
@@ -25,7 +30,7 @@ const PORT = process.env.PORT || 3001;
 
 // CORS for development
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: true,
   credentials: true,
 }));
 
