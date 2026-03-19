@@ -4,6 +4,7 @@ import api from '../api';
 interface User {
   id: string;
   email: string;
+  is_demo?: boolean;
 }
 
 interface AuthContextType {

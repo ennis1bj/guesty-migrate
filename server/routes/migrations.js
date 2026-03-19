@@ -331,6 +331,40 @@ router.post('/:id/retry', async (req, res) => {
   }
 });
 
+// POST /api/migrations/:id/demo-activate — bypass payment for demo users
+router.post('/:id/demo-activate', async (req, res) => {
+  try {
+    if (!req.user.is_demo) {
+      return res.status(403).json({ error: 'Demo activation is only available for demo accounts' });
+    }
+
+    const { id } = req.params;
+    const { selectedCategories } = req.body;
+
+    const migResult = await pool.query(
+      "SELECT * FROM migrations WHERE id = $1 AND user_id = $2 AND status = 'pending'",
+      [id, req.user.id]
+    );
+
+    if (migResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Migration not found or already activated' });
+    }
+
+    await pool.query(
+      "UPDATE migrations SET status = 'paid', selected_categories = $1 WHERE id = $2",
+      [selectedCategories || ['custom_fields', 'fees', 'taxes', 'listings', 'guests', 'owners', 'reservations', 'automations', 'tasks'], id]
+    );
+
+    const { enqueueMigration } = require('../queue');
+    await enqueueMigration(id);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Demo activate error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ── GET /api/migrations — list user's migrations ────────────────────────────
 
 router.get('/', async (req, res) => {
