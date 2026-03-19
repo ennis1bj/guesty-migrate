@@ -3,49 +3,14 @@ const { pool } = require('../db');
 const { encrypt, decrypt } = require('../encryption');
 const { authenticateToken } = require('../auth');
 const GuestyClient = require('../guestyClient');
+const { getTierFromListings, calculatePerListingCents, getAddonPriceMap } = require('../pricing');
 
 const router = express.Router();
 
 // All routes require authentication
 router.use(authenticateToken);
 
-// ── Pricing helpers ─────────────────────────────────────────────────────────
-
-function getTierFromListings(count) {
-  if (count <= 10)  return { tier: 'starter',        priceEnvKey: 'STRIPE_PRICE_STARTER',        amountCents: 14900 };
-  if (count <= 50)  return { tier: 'growth',          priceEnvKey: 'STRIPE_PRICE_GROWTH',          amountCents: 34900 };
-  if (count <= 150) return { tier: 'professional',    priceEnvKey: 'STRIPE_PRICE_PROFESSIONAL',    amountCents: 69900 };
-  if (count <= 300) return { tier: 'business',        priceEnvKey: 'STRIPE_PRICE_BUSINESS',        amountCents: 99900 };
-  if (count <= 500) return { tier: 'enterprise',      priceEnvKey: 'STRIPE_PRICE_ENTERPRISE',      amountCents: 149900 };
-  return { tier: 'enterprise_plus', requiresQuote: true };
-}
-
-/**
- * Compute the per-listing graduated price in cents.
- *   Base fee: $79 flat
- *   Listings 1–50:  $8.00 each
- *   Listings 51–200: $5.00 each
- *   Listings 201+:  $3.00 each
- */
-function calculatePerListingCents(listingCount) {
-  const baseCents = 7900;
-  let total = baseCents;
-  const tier1 = Math.min(listingCount, 50);
-  total += tier1 * 800;
-  const tier2 = Math.min(Math.max(listingCount - 50, 0), 150);
-  total += tier2 * 500;
-  const tier3 = Math.max(listingCount - 200, 0);
-  total += tier3 * 300;
-  return total;
-}
-
-// Valid add-on keys → env var mapping
-const ADDON_PRICE_MAP = {
-  priority:   'STRIPE_PRICE_ADDON_PRIORITY',
-  support:    'STRIPE_PRICE_ADDON_SUPPORT',
-  remigrate:  'STRIPE_PRICE_ADDON_REMIGRATE',
-  verify:     'STRIPE_PRICE_ADDON_VERIFY',
-};
+const ADDON_PRICE_MAP = getAddonPriceMap();
 
 // ── POST /api/migrations/preflight ──────────────────────────────────────────
 
@@ -68,14 +33,16 @@ router.post('/preflight', async (req, res) => {
       await sourceClient.getAccessToken();
 
       // Fetch full listings (needed for photo count) and counts for the rest
-      const [customFields, fees, taxes, allListings, reservations, guests, owners, automations, tasks] = await Promise.all([
+      const [customFields, rateStrategies, fees, taxes, allListings, reservations, guests, owners, savedReplies, automations, tasks] = await Promise.all([
         sourceClient.getCount('/custom-fields'),
+        sourceClient.getCount('/rate-strategies'),
         sourceClient.getCount('/fees'),
         sourceClient.getCount('/taxes'),
         sourceClient.getAllListings(),
         sourceClient.getCount('/reservations'),
         sourceClient.getCount('/guests'),
         sourceClient.getCount('/owners'),
+        sourceClient.getCount('/saved-replies'),
         sourceClient.getCount('/automations'),
         sourceClient.getCount('/tasks-open-api/tasks'),
       ]);
@@ -86,12 +53,14 @@ router.post('/preflight', async (req, res) => {
 
       manifest = {
         custom_fields: customFields,
+        rate_strategies: rateStrategies,
         fees,
         taxes,
         listings: allListings.length,
         reservations,
         guests,
         owners,
+        saved_replies: savedReplies,
         automations,
         tasks,
         photos: photoCount,
@@ -122,16 +91,16 @@ router.post('/preflight', async (req, res) => {
     const tierInfo = getTierFromListings(manifest.listings);
     const perListingCents = calculatePerListingCents(manifest.listings);
 
-    // Persist migration row
+    // Persist migration row — encrypt ALL credential fields at rest
     const result = await pool.query(
       `INSERT INTO migrations (user_id, source_client_id, source_client_secret, dest_client_id, dest_client_secret, status, manifest)
        VALUES ($1, $2, $3, $4, $5, 'pending', $6)
        RETURNING id`,
       [
         req.user.id,
-        sourceClientId,
+        encrypt(sourceClientId),
         encrypt(sourceClientSecret),
-        destClientId,
+        encrypt(destClientId),
         encrypt(destClientSecret),
         JSON.stringify(manifest),
       ]
@@ -234,7 +203,7 @@ router.post('/:id/checkout', async (req, res) => {
        WHERE id = $5`,
       [
         session.id,
-        selectedCategories || ['custom_fields', 'fees', 'taxes', 'listings', 'guests', 'owners', 'reservations', 'automations', 'tasks'],
+        selectedCategories || ['custom_fields', 'rate_strategies', 'fees', 'taxes', 'listings', 'guests', 'owners', 'saved_replies', 'reservations', 'automations', 'tasks'],
         JSON.stringify(validAddOns),
         pricingMode,
         id,
@@ -352,7 +321,7 @@ router.post('/:id/demo-activate', async (req, res) => {
 
     await pool.query(
       "UPDATE migrations SET status = 'paid', selected_categories = $1 WHERE id = $2",
-      [selectedCategories || ['custom_fields', 'fees', 'taxes', 'listings', 'guests', 'owners', 'reservations', 'automations', 'tasks'], id]
+      [selectedCategories || ['custom_fields', 'rate_strategies', 'fees', 'taxes', 'listings', 'guests', 'owners', 'saved_replies', 'reservations', 'automations', 'tasks'], id]
     );
 
     const { enqueueMigration } = require('../queue');
@@ -379,5 +348,22 @@ router.get('/', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// ── GET /api/migrations/pricing — public pricing info ───────────────────────
+// Note: this route does not require authentication and is mounted on the
+// parent router so it can be called from the landing page.
+
+router.getPricingHandler = (req, res) => {
+  const { PRICING_TIERS, ADDON_DEFINITIONS } = require('../pricing');
+  const tiers = PRICING_TIERS.map(t => ({
+    tier: t.tier,
+    maxListings: t.maxListings,
+    amountCents: t.amountCents,
+    displayPrice: t.displayPrice,
+    popular: t.popular,
+  }));
+  tiers.push({ tier: 'enterprise_plus', maxListings: null, amountCents: null, displayPrice: 'Custom', popular: false });
+  res.json({ tiers, addOns: ADDON_DEFINITIONS });
+};
 
 module.exports = router;

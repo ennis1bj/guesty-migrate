@@ -20,6 +20,7 @@ const path = require('path');
 const rateLimit = require('express-rate-limit');
 const { pool, migrate } = require('./db');
 const { initQueue, recoverStuckMigrations } = require('./queue');
+const { logger, requestIdMiddleware } = require('./logger');
 
 const authRoutes = require('./routes/auth');
 const migrationRoutes = require('./routes/migrations');
@@ -27,6 +28,9 @@ const webhookRoutes = require('./routes/webhooks');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Request ID + structured logging middleware
+app.use(requestIdMiddleware);
 
 // CORS for development
 app.use(cors({
@@ -60,10 +64,20 @@ app.use('/api/migrations', migrationLimiter);
 app.use('/api/auth', authRoutes);
 app.use('/api/migrations', migrationRoutes);
 
+// Public pricing endpoint (no auth required)
+app.get('/api/pricing', migrationRoutes.getPricingHandler);
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+// API documentation (Swagger UI)
+if (process.env.NODE_ENV !== 'production') {
+  const { mountSwagger } = require('./swagger');
+  mountSwagger(app);
+  logger.info('API docs available at /api/docs');
+}
 
 // Serve frontend in production
 const clientDist = path.join(__dirname, '..', 'client', 'dist');
@@ -77,7 +91,7 @@ async function start() {
   try {
     // Run database migrations
     await migrate();
-    console.log('Database ready');
+    logger.info('Database ready');
 
     // Recover any stuck migrations from before restart
     await recoverStuckMigrations();
@@ -86,10 +100,10 @@ async function start() {
     initQueue();
 
     app.listen(PORT, () => {
-      console.log(`GuestyMigrate server running on port ${PORT}`);
+      logger.info(`GuestyMigrate server running on port ${PORT}`);
     });
   } catch (err) {
-    console.error('Failed to start server:', err);
+    logger.error('Failed to start server', { error: err.message });
     process.exit(1);
   }
 }

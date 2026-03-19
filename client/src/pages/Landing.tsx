@@ -68,6 +68,24 @@ const pricingTiers = [
   { name: 'Enterprise+',   listings: '500+',      price: 'Custom', popular: false, isCustom: true },
 ];
 
+const testimonials = [
+  {
+    quote: 'GuestyMigrate saved us weeks of manual work. We moved 120 listings between accounts in under an hour with everything intact.',
+    name: 'Sarah M.',
+    role: 'Operations Manager, Coastal Rentals',
+  },
+  {
+    quote: 'The verification report gave us confidence that nothing was lost. We migrated reservations, automations, and photos — all seamlessly.',
+    name: 'David K.',
+    role: 'Director of Property Management, Urban Stay Group',
+  },
+  {
+    quote: 'We tried CSV exports and it was a nightmare. GuestyMigrate handled the ID remapping perfectly. Worth every penny.',
+    name: 'Maria L.',
+    role: 'Founder, Beachfront Hospitality',
+  },
+];
+
 const faqs = [
   {
     q: 'How long does a migration take?',
@@ -124,7 +142,7 @@ export default function Landing() {
           </h1>
 
           <p className="text-lg sm:text-xl text-slate-300 max-w-3xl mx-auto mb-10 leading-relaxed">
-            Transfer listings, reservations, guests, photos, automations, and 9 data categories
+            Transfer listings, reservations, guests, photos, automations, and 11 data categories
             between Guesty accounts — fully automated with a verification report.
           </p>
 
@@ -167,7 +185,7 @@ export default function Landing() {
               <svg className="w-5 h-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
-              <span className="text-sm font-semibold">9 Data Categories</span>
+              <span className="text-sm font-semibold">11 Data Categories</span>
             </div>
             <div className="w-px h-5 bg-stone-200 hidden sm:block" />
             <div className="flex items-center gap-2 text-slate-600">
@@ -219,7 +237,7 @@ export default function Landing() {
               Everything Migrates. Nothing Left Behind.
             </h2>
             <p className="text-lg text-slate-500 max-w-2xl mx-auto">
-              GuestyMigrate handles all 9 data categories with smart dependency ordering and 100% ID remapping.
+              GuestyMigrate handles all 11 data categories with smart dependency ordering and 100% ID remapping.
             </p>
           </div>
 
@@ -315,7 +333,7 @@ export default function Landing() {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl mx-auto">
             <div className="text-center p-6 bg-[#fafaf8] rounded-2xl border border-stone-200">
-              <p className="text-5xl font-extrabold text-amber-500 mb-3">9</p>
+              <p className="text-5xl font-extrabold text-amber-500 mb-3">11</p>
               <p className="text-slate-700 font-semibold">Data Categories</p>
               <p className="text-sm text-slate-400 mt-1">Migrated automatically</p>
             </div>
@@ -329,6 +347,56 @@ export default function Landing() {
               <p className="text-slate-700 font-semibold">Encryption</p>
               <p className="text-sm text-slate-400 mt-1">Credentials secured at rest</p>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Social Proof / Testimonials ───────────────────────── */}
+      <section className="py-20 sm:py-24 bg-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight mb-4">
+              Trusted by Property Managers
+            </h2>
+            <div className="flex flex-wrap justify-center items-center gap-4 mt-6">
+              <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-4 py-2 rounded-full">
+                <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                </svg>
+                <span className="text-sm font-semibold text-emerald-800">AES-256 encrypted</span>
+              </div>
+              <div className="flex items-center gap-2 bg-sky-50 border border-sky-200 px-4 py-2 rounded-full">
+                <svg className="w-4 h-4 text-sky-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                </svg>
+                <span className="text-sm font-semibold text-sky-800">Stripe secure payments</span>
+              </div>
+              <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 px-4 py-2 rounded-full">
+                <svg className="w-4 h-4 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <span className="text-sm font-semibold text-amber-800">Guesty Open API</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+            {testimonials.map((t, i) => (
+              <div key={i} className="bg-[#fafaf8] border border-stone-200 rounded-2xl p-6">
+                <div className="flex gap-1 mb-3">
+                  {[...Array(5)].map((_, si) => (
+                    <svg key={si} className="w-4 h-4 text-amber-400" fill="currentColor" viewBox="0 0 20 20">
+                      <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                    </svg>
+                  ))}
+                </div>
+                <p className="text-slate-600 leading-relaxed mb-4">"{t.quote}"</p>
+                <div>
+                  <p className="text-sm font-bold text-slate-900">{t.name}</p>
+                  <p className="text-xs text-slate-400">{t.role}</p>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </section>

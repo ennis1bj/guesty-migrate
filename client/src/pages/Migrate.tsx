@@ -14,7 +14,7 @@ const STEPS = [
   { label: 'Progress', description: 'Migration' },
 ];
 
-const ALL_CATEGORIES = ['custom_fields', 'fees', 'taxes', 'listings', 'guests', 'owners', 'reservations', 'automations', 'tasks'];
+const ALL_CATEGORIES = ['custom_fields', 'rate_strategies', 'fees', 'taxes', 'listings', 'guests', 'owners', 'saved_replies', 'reservations', 'automations', 'tasks'];
 
 type PricingMode = 'flat_tier' | 'per_listing';
 type AddOnKey = 'priority' | 'support' | 'remigrate' | 'verify';

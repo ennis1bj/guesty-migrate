@@ -1,6 +1,7 @@
 const axios = require('axios');
 const FormData = require('form-data');
 const { pool } = require('./db');
+const { encrypt, decrypt } = require('./encryption');
 
 const BASE_URL = 'https://open-api.guesty.com/v1';
 const AUTH_URL = 'https://open-api.guesty.com/oauth2/token';
@@ -22,7 +23,7 @@ class GuestyClient {
     if (cached.rows.length > 0) {
       const { access_token, expires_at } = cached.rows[0];
       if (new Date(expires_at) > new Date(Date.now() + 60000)) {
-        return access_token;
+        try { return decrypt(access_token); } catch { return access_token; }
       }
     }
 
@@ -38,12 +39,12 @@ class GuestyClient {
     const { access_token, expires_in } = response.data;
     const expiresAt = new Date(Date.now() + (expires_in || 3600) * 1000);
 
-    // Upsert cache
+    // Upsert cache — encrypt token at rest
     await pool.query(
       `INSERT INTO token_cache (client_id, access_token, expires_at)
        VALUES ($1, $2, $3)
        ON CONFLICT (client_id) DO UPDATE SET access_token = $2, expires_at = $3`,
-      [this.clientId, access_token, expiresAt]
+      [this.clientId, encrypt(access_token), expiresAt]
     );
 
     return access_token;
@@ -112,6 +113,22 @@ class GuestyClient {
 
   async createTax(data) {
     return this.request('POST', '/taxes', data);
+  }
+
+  async getAllRateStrategies() {
+    return this.getAllPaginated('/rate-strategies', 'results');
+  }
+
+  async createRateStrategy(data) {
+    return this.request('POST', '/rate-strategies', data);
+  }
+
+  async getAllSavedReplies() {
+    return this.getAllPaginated('/saved-replies', 'results');
+  }
+
+  async createSavedReply(data) {
+    return this.request('POST', '/saved-replies', data);
   }
 
   async getAllListings() {

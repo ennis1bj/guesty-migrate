@@ -7,18 +7,24 @@ Self-serve migration tool for transferring data between Guesty.com property mana
 GuestyMigrate lets property managers migrate all their data from one Guesty account to another — fully automated. It handles:
 
 - **Custom Fields** — custom field definitions
+- **Rate Strategies** — pricing rules, seasonal rates, and base pricing configurations
 - **Fees** — fee structures
 - **Taxes** — tax configurations
-- **Listings** — property configurations, details, and photos
+- **Listings** — property configurations, details, photos, and complex (MTL) parent-child relationships
 - **Guests** — guest profiles and contact information (with 409 deduplication)
 - **Owners** — property owner records
+- **Saved Replies** — message templates with listing-scoped remapping
 - **Reservations** — direct/manual bookings with listing and guest ID remapping (channel reservations are skipped)
 - **Automations** — workflow automation rules with listing ID remapping
 - **Tasks** — task assignments with listing ID remapping (created unassigned)
 - **Photos** — native listing photos uploaded to destination (channel-managed photos are skipped)
 - **Calendar Blocks** — manual availability blocks transferred per listing
 
-The migration engine respects dependency ordering (listings before reservations), handles API rate limits, recovers from partial failures, and produces a verification diff report when complete.
+The migration engine respects dependency ordering (rate strategies → listings → reservations), handles API rate limits, recovers from partial failures, and produces a verification diff report when complete.
+
+### Complex Listing (MTL) Support
+
+GuestyMigrate automatically detects Multi-Unit/Complex listing hierarchies. Parent listings are migrated before sub-units, and `parentId` references are remapped to preserve the full parent-child structure in the destination account.
 
 ## Who It's For
 
@@ -48,9 +54,11 @@ Property managers switching between Guesty accounts, agencies managing multiple 
 - **Database**: PostgreSQL (via node-postgres with connection pooling)
 - **Job Queue**: BullMQ + Redis (falls back to in-process execution if Redis is unavailable)
 - **Payments**: Stripe Checkout
-- **Email**: SendGrid via Nodemailer (falls back to console logging)
-- **Auth**: JWT with bcryptjs password hashing
-- **Encryption**: AES-256-CBC for API credentials at rest
+- **Email**: Resend (falls back to console logging)
+- **Auth**: JWT with bcryptjs password hashing, email verification, password reset
+- **Encryption**: AES-256-CBC for all credentials at rest (client IDs, secrets, and OAuth tokens)
+- **Logging**: Structured JSON logging with request correlation IDs
+- **API Docs**: OpenAPI/Swagger at `/api/docs` (development)
 
 ## Running Locally
 
@@ -82,6 +90,18 @@ npm run dev
 ```
 
 The frontend runs on `http://localhost:5173` and the backend on `http://localhost:3001`. The Vite dev server proxies `/api` requests to the backend.
+
+API documentation is available at `http://localhost:3001/api/docs` in development mode.
+
+## Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run with coverage
+npm run test:coverage
+```
 
 ## Running in Production
 
@@ -121,6 +141,7 @@ Express serves the built frontend from `client/dist` for all non-API routes.
 | `REDIS_URL` | Redis connection URL (optional) |
 | `FRONTEND_URL` | Frontend URL for CORS and redirects |
 | `FROM_EMAIL` | Sender email for migration reports (default: noreply@guestymigrate.com) |
+| `LOG_LEVEL` | Logging level: debug, info, warn, error (default: info) |
 
 ## Configuring Stripe
 
@@ -135,9 +156,29 @@ Express serves the built frontend from `client/dist` for all non-API routes.
 
 | Listings | Price |
 |----------|-------|
-| 1 – 10   | $99   |
-| 11 – 50  | $299  |
-| 51+      | $599  |
+| 1 – 10   | $149  |
+| 11 – 50  | $349  |
+| 51 – 150 | $699  |
+| 151 – 300| $999  |
+| 301 – 500| $1,499|
+| 500+     | Custom|
+
+Alternatively, customers can choose per-listing graduated pricing at checkout:
+- Base fee: $79
+- Listings 1–50: $8.00/listing
+- Listings 51–200: $5.00/listing
+- Listings 201+: $3.00/listing
+
+## API Documentation
+
+In development mode, interactive API documentation (Swagger UI) is available at `/api/docs`. The raw OpenAPI spec can be accessed at `/api/docs/spec.json`.
+
+## GDPR / Data Subject Rights
+
+GuestyMigrate provides the following endpoints for GDPR compliance:
+
+- `GET /api/auth/export` — Export all user data in JSON format (requires authentication)
+- `DELETE /api/auth/account` — Delete account and all associated data with proper cascade (requires authentication)
 
 ## Obtaining Guesty Open API Credentials
 

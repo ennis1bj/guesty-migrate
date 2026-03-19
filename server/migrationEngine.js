@@ -2,18 +2,21 @@ const { pool } = require('./db');
 const { decrypt } = require('./encryption');
 const GuestyClient = require('./guestyClient');
 const { sendMigrationReport } = require('./email');
+const { logger } = require('./logger');
 
 function getCategoryPath(category) {
   const paths = {
-    custom_fields: '/custom-fields',
-    listings:      '/listings',
-    reservations:  '/reservations',
-    guests:        '/guests',
-    owners:        '/owners',
-    automations:   '/automations',
-    tasks:         '/tasks-open-api/tasks',
-    fees:          '/fees',
-    taxes:         '/taxes',
+    custom_fields:   '/custom-fields',
+    rate_strategies: '/rate-strategies',
+    fees:            '/fees',
+    taxes:           '/taxes',
+    listings:        '/listings',
+    guests:          '/guests',
+    owners:          '/owners',
+    saved_replies:   '/saved-replies',
+    reservations:    '/reservations',
+    automations:     '/automations',
+    tasks:           '/tasks-open-api/tasks',
   };
   return paths[category] || `/${category}`;
 }
@@ -22,6 +25,7 @@ const SOURCE_ONLY_FIELDS = new Set([
   '_id', 'accountId', 'createdAt', 'updatedAt',
   'channelListingId', 'importedAt', 'integrations',
   'id',
+  // NOTE: parentId is intentionally NOT in this set — it needs remapping for complex listings
 ]);
 
 function stripFieldsDeep(obj) {
@@ -64,11 +68,41 @@ function groupContiguousDays(days) {
   return ranges;
 }
 
+/**
+ * Classify listings into standalone, parent (MTL/complex), and sub-units.
+ */
+function classifyListings(listings) {
+  const parents = listings.filter(l =>
+    l.listingType === 'MTL' || l.type === 'complex' ||
+    (Array.isArray(l.subListingsIds) && l.subListingsIds.length > 0)
+  );
+  const parentIds = new Set(parents.map(p => p._id));
+  const subUnits = listings.filter(l => l.parentId != null && !parentIds.has(l._id));
+  const subUnitIds = new Set(subUnits.map(s => s._id));
+  const standalone = listings.filter(l => !parentIds.has(l._id) && !subUnitIds.has(l._id));
+  return { standalone, parents, subUnits };
+}
+
 const CATEGORIES = {
   custom_fields: {
     getAll: (client) => client.getAllCustomFields(),
     create: (client, data) => client.createCustomField(data),
     idField: '_id',
+  },
+  rate_strategies: {
+    getAll: (client) => client.getAllRateStrategies(),
+    create: (client, data) => client.createRateStrategy(data),
+    idField: '_id',
+    transform: (item, maps) => {
+      const cleaned = stripFieldsDeep(item);
+      if (Array.isArray(cleaned.listingIds) && maps.listings) {
+        cleaned.listingIds = cleaned.listingIds.map(id => maps.listings[id] || id);
+      }
+      if (cleaned.listingId && maps.listings) {
+        cleaned.listingId = maps.listings[cleaned.listingId] || cleaned.listingId;
+      }
+      return cleaned;
+    },
   },
   fees: {
     getAll: (client) => client.getAllFees(),
@@ -84,6 +118,22 @@ const CATEGORIES = {
     getAll: (client) => client.getAllListings(),
     create: (client, data) => client.createListing(data),
     idField: '_id',
+    /**
+     * Custom ordering: standalone first, then parents, then sub-units.
+     * This ensures parentId can be remapped for sub-units.
+     */
+    sortItems: (items) => {
+      const { standalone, parents, subUnits } = classifyListings(items);
+      return [...standalone, ...parents, ...subUnits];
+    },
+    transform: (item, maps) => {
+      const cleaned = stripFieldsDeep(item);
+      // Remap parentId for sub-units (complex listing children)
+      if (cleaned.parentId && maps.listings) {
+        cleaned.parentId = maps.listings[cleaned.parentId] || cleaned.parentId;
+      }
+      return cleaned;
+    },
   },
   guests: {
     getAll: (client) => client.getAllGuests(),
@@ -155,6 +205,27 @@ const CATEGORIES = {
       return cleaned;
     },
   },
+  saved_replies: {
+    getAll: (client) => client.getAllSavedReplies(),
+    create: (client, data) => client.createSavedReply(data),
+    idField: '_id',
+    transform: (item, maps) => {
+      const cleaned = stripFieldsDeep(item);
+      // Remap listing-scoped saved replies
+      if (cleaned.listingId && maps.listings) {
+        cleaned.listingId = maps.listings[cleaned.listingId] || cleaned.listingId;
+      }
+      if (Array.isArray(cleaned.listingIds) && maps.listings) {
+        cleaned.listingIds = cleaned.listingIds.map(id => maps.listings[id] || id);
+      }
+      return cleaned;
+    },
+    handleConflict: async (err, item, destClient, idMap) => {
+      // 409 = saved reply with same title already exists — treat as success
+      if (err.response?.status === 409) return true;
+      return false;
+    },
+  },
   tasks: {
     getAll: (client) => client.getAllTasks(),
     create: (client, data) => client.createTask(data),
@@ -178,7 +249,19 @@ const CATEGORIES = {
 };
 
 // Strict migration order for dependency resolution
-const MIGRATION_ORDER = ['custom_fields', 'fees', 'taxes', 'listings', 'guests', 'owners', 'reservations', 'automations', 'tasks'];
+const MIGRATION_ORDER = [
+  'custom_fields',
+  'rate_strategies',
+  'fees',
+  'taxes',
+  'listings',
+  'guests',
+  'owners',
+  'saved_replies',
+  'reservations',
+  'automations',
+  'tasks',
+];
 
 async function updateStatus(migrationId, status, extra = {}) {
   const sets = ['status = $2'];
@@ -224,6 +307,7 @@ async function loadPreviousResults(migrationId) {
 }
 
 async function runMigration(migrationId) {
+  const log = logger.child({ migrationId });
   try {
   const migResult = await pool.query('SELECT * FROM migrations WHERE id = $1', [migrationId]);
   if (migResult.rows.length === 0) throw new Error(`Migration ${migrationId} not found`);
@@ -235,12 +319,12 @@ async function runMigration(migrationId) {
   await updateStatus(migrationId, 'running');
 
   const sourceClient = new GuestyClient({
-    clientId: migration.source_client_id,
+    clientId: decrypt(migration.source_client_id),
     clientSecret: decrypt(migration.source_client_secret),
   });
 
   const destClient = new GuestyClient({
-    clientId: migration.dest_client_id,
+    clientId: decrypt(migration.dest_client_id),
     clientSecret: decrypt(migration.dest_client_secret),
   });
 
@@ -258,13 +342,17 @@ async function runMigration(migrationId) {
 
     // Skip categories that already completed successfully in a prior run
     if (previousResults[category] > 0) {
-      console.log(`Skipping ${category} — already migrated in prior run (${previousResults[category]} items)`);
+      log.info(`Skipping ${category} — already migrated in prior run`, { count: previousResults[category] });
       continue;
     }
 
     try {
-      console.log(`Migrating ${category}...`);
-      const sourceItems = await categoryDef.getAll(sourceClient);
+      log.info(`Migrating ${category}...`);
+      let sourceItems = await categoryDef.getAll(sourceClient);
+      // Apply custom sort order if defined (e.g., complex listing hierarchy)
+      if (categoryDef.sortItems) {
+        sourceItems = categoryDef.sortItems(sourceItems);
+      }
       const sourceCount = sourceItems.length;
       let migratedCount = 0;
       let failedCount = 0;
@@ -349,6 +437,13 @@ async function runMigration(migrationId) {
             }
           }
         } catch (err) {
+          // Handle 409 conflicts generically or per-category
+          if (categoryDef.handleConflict) {
+            try {
+              const handled = await categoryDef.handleConflict(err, item, destClient, idMap);
+              if (handled) { migratedCount++; continue; }
+            } catch { /* fall through */ }
+          }
           if (category === 'guests' && err.response?.status === 409) {
             // Guest already exists in destination — try to find by email
             try {
@@ -438,19 +533,20 @@ async function runMigration(migrationId) {
       await sendMigrationReport(userResult.rows[0].email, updatedMig.rows[0]);
     }
   } catch (err) {
-    console.error('Failed to send migration report email:', err.message);
+    log.error('Failed to send migration report email', { error: err.message });
   }
 
-  console.log(`Migration ${migrationId} completed with status: ${finalStatus}`);
+  log.info(`Migration completed with status: ${finalStatus}`);
   } catch (topLevelErr) {
     // Top-level catch prevents migrations from being stuck in 'running' forever
-    console.error(`Migration ${migrationId} failed with unhandled error:`, topLevelErr);
+    const log = logger.child({ migrationId });
+    log.error('Migration failed with unhandled error', { error: topLevelErr.message });
     try {
       await updateStatus(migrationId, 'failed', {
         error_message: topLevelErr.message || 'Unhandled migration error',
       });
     } catch (statusErr) {
-      console.error(`Failed to update migration ${migrationId} status:`, statusErr);
+      log.error('Failed to update migration status', { error: statusErr.message });
     }
   }
 }
