@@ -156,11 +156,27 @@ async function logCategory(migrationId, category, status, sourceCount, migratedC
   );
 }
 
+async function loadPreviousResults(migrationId) {
+  const result = await pool.query(
+    `SELECT category, migrated_count FROM migration_logs
+     WHERE migration_id = $1 ORDER BY created_at ASC`,
+    [migrationId]
+  );
+  // Returns map of category -> already migrated count
+  const prev = {};
+  for (const row of result.rows) {
+    prev[row.category] = row.migrated_count || 0;
+  }
+  return prev;
+}
+
 async function runMigration(migrationId) {
   const migResult = await pool.query('SELECT * FROM migrations WHERE id = $1', [migrationId]);
   if (migResult.rows.length === 0) throw new Error(`Migration ${migrationId} not found`);
 
   const migration = migResult.rows[0];
+
+  const previousResults = await loadPreviousResults(migrationId);
 
   await updateStatus(migrationId, 'running');
 
@@ -185,6 +201,12 @@ async function runMigration(migrationId) {
 
     const categoryDef = CATEGORIES[category];
     if (!categoryDef) continue;
+
+    // Skip categories that already completed successfully in a prior run
+    if (previousResults[category] > 0) {
+      console.log(`Skipping ${category} — already migrated in prior run (${previousResults[category]} items)`);
+      continue;
+    }
 
     try {
       console.log(`Migrating ${category}...`);
