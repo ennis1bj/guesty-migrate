@@ -157,22 +157,24 @@ class GuestyClient {
   }
 
   async uploadListingPhoto(listingId, photoUrl) {
-    // Download the photo binary
-    const downloadResponse = await axios.get(photoUrl, {
+    const token = await this.getAccessToken();
+
+    // Download image with 15s timeout
+    const imageResponse = await axios.get(photoUrl, {
       responseType: 'arraybuffer',
       timeout: 15000,
     });
 
-    const buffer = Buffer.from(downloadResponse.data);
+    const contentType = imageResponse.headers['content-type'] || 'image/jpeg';
+    const ext = contentType.split('/')[1]?.split(';')[0] || 'jpg';
+    const filename = `photo_${Date.now()}.${ext}`;
 
-    // Build multipart form
     const form = new FormData();
-    form.append('file', buffer, {
-      filename: 'photo.jpg',
-      contentType: downloadResponse.headers['content-type'] || 'image/jpeg',
+    form.append('picture', Buffer.from(imageResponse.data), {
+      filename,
+      contentType,
     });
 
-    const token = await this.getAccessToken();
     const response = await axios.post(
       `${BASE_URL}/listings/${listingId}/pictures/upload`,
       form,
@@ -181,6 +183,7 @@ class GuestyClient {
           Authorization: `Bearer ${token}`,
           ...form.getHeaders(),
         },
+        timeout: 30000,
       }
     );
 
@@ -188,12 +191,8 @@ class GuestyClient {
   }
 
   isChannelListing(listing) {
-    if (!Array.isArray(listing.integrations) || listing.integrations.length === 0) {
-      return false;
-    }
-    return listing.integrations.some(
-      (i) => i.channelName || i.platform || i.channel
-    );
+    return Array.isArray(listing.integrations) &&
+           listing.integrations.some(i => i && (i.channelName || i.platform || i.channel));
   }
 }
 
