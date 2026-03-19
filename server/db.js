@@ -57,6 +57,10 @@ const migrate = async () => {
     `);
 
     await client.query(`
+      ALTER TABLE migration_logs ADD COLUMN IF NOT EXISTS skipped_count INT DEFAULT 0;
+    `);
+
+    await client.query(`
       CREATE TABLE IF NOT EXISTS token_cache (
         client_id TEXT PRIMARY KEY,
         access_token TEXT NOT NULL,

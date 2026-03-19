@@ -54,6 +54,18 @@ const CATEGORIES = {
     getAll: (client) => client.getAllReservations(),
     create: (client, data) => client.createReservation(data),
     idField: '_id',
+    filter: (item) => {
+      // Only migrate direct/manual reservations — skip channel-owned ones
+      const src = item.source;
+      if (!src) return true; // no source field — allow
+      const platform = (src.platform || src.channel || '').toLowerCase();
+      // Skip Airbnb, Vrbo, Booking.com, Agoda, Expedia, etc.
+      const CHANNEL_PLATFORMS = [
+        'airbnb', 'homeaway', 'vrbo', 'bookingcom', 'booking.com',
+        'agoda', 'expedia', 'tripadvisor', 'google', 'houfy',
+      ];
+      return !CHANNEL_PLATFORMS.some(p => platform.includes(p));
+    },
     transform: (item, maps) => {
       const cleaned = stripFieldsDeep(item);
       if (cleaned.listingId && maps.listings) {
@@ -128,11 +140,12 @@ async function updateStatus(migrationId, status, extra = {}) {
   await pool.query(`UPDATE migrations SET ${sets.join(', ')} WHERE id = $1`, values);
 }
 
-async function logCategory(migrationId, category, status, sourceCount, migratedCount, failedCount, errorDetails, photos = null) {
+async function logCategory(migrationId, category, status, sourceCount, migratedCount, failedCount, skippedCount, errorDetails, photos = null) {
   await pool.query(
-    `INSERT INTO migration_logs (migration_id, category, status, source_count, migrated_count, failed_count, error_details, photos)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    `INSERT INTO migration_logs (migration_id, category, status, source_count, migrated_count, failed_count, skipped_count, error_details, photos)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
     [migrationId, category, status, sourceCount, migratedCount, failedCount,
+     skippedCount,
      errorDetails ? JSON.stringify(errorDetails) : null,
      photos ? JSON.stringify(photos) : null]
   );
@@ -174,11 +187,18 @@ async function runMigration(migrationId) {
       const sourceCount = sourceItems.length;
       let migratedCount = 0;
       let failedCount = 0;
+      let skippedCount = 0;
       const errors = [];
       const idMap = {};
 
       for (const item of sourceItems) {
         try {
+          // Skip items that don't pass the category filter
+          if (categoryDef.filter && !categoryDef.filter(item)) {
+            skippedCount++;
+            continue; // don't count as failed — just skip
+          }
+
           const sourceId = item[categoryDef.idField];
           let transformed;
 
@@ -240,14 +260,14 @@ async function runMigration(migrationId) {
       if (failedCount > 0) hasFailures = true;
 
       const photosForLog = category === 'listings' ? totalPhotos : null;
-      await logCategory(migrationId, category, failedCount === 0 ? 'complete' : 'partial', sourceCount, migratedCount, failedCount, errors.length > 0 ? errors : null, photosForLog);
+      await logCategory(migrationId, category, failedCount === 0 ? 'complete' : 'partial', sourceCount, migratedCount, failedCount, skippedCount, errors.length > 0 ? errors : null, photosForLog);
 
       // Update results incrementally
       await updateStatus(migrationId, 'running', { results });
     } catch (err) {
       hasFailures = true;
       results[category] = { sourceCount: 0, migratedCount: 0, failedCount: 0, error: err.message };
-      await logCategory(migrationId, category, 'failed', 0, 0, 0, [{ error: err.message }]);
+      await logCategory(migrationId, category, 'failed', 0, 0, 0, 0, [{ error: err.message }]);
     }
   }
 
