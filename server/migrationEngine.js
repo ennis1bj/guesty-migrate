@@ -69,6 +69,29 @@ const CATEGORIES = {
     getAll: (client) => client.getAllAutomations(),
     create: (client, data) => client.createAutomation(data),
     idField: '_id',
+    transform: (item, maps) => {
+      const cleaned = stripFieldsDeep(item);
+      // Remap top-level listingId
+      if (cleaned.listingId && maps.listings) {
+        cleaned.listingId = maps.listings[cleaned.listingId] || cleaned.listingId;
+      }
+      // Remap listingIds array if present
+      if (Array.isArray(cleaned.listingIds) && maps.listings) {
+        cleaned.listingIds = cleaned.listingIds.map(
+          id => maps.listings[id] || id
+        );
+      }
+      // Remap conditions array entries that reference listingId
+      if (Array.isArray(cleaned.conditions)) {
+        cleaned.conditions = cleaned.conditions.map(cond => {
+          if (cond.listingId && maps.listings) {
+            return { ...cond, listingId: maps.listings[cond.listingId] || cond.listingId };
+          }
+          return cond;
+        });
+      }
+      return cleaned;
+    },
   },
   tasks: {
     getAll: (client) => client.getAllTasks(),
