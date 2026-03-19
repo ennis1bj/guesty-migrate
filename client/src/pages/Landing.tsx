@@ -126,12 +126,47 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* Why GuestyMigrate */}
+      <section className="py-20 bg-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <h2 className="text-3xl font-bold text-center text-gray-900 mb-4">
+            Why GuestyMigrate?
+          </h2>
+          <p className="text-center text-gray-600 mb-12 max-w-2xl mx-auto">
+            Guesty doesn't offer a built-in migration tool between accounts. Manual exports and CSV
+            imports lose data relationships, break automations, and take weeks of tedious work.
+            GuestyMigrate does it in minutes.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl mx-auto">
+            <div className="text-center">
+              <p className="text-4xl font-extrabold text-indigo-600 mb-2">9</p>
+              <p className="text-gray-700 font-medium">Data categories migrated</p>
+            </div>
+            <div className="text-center">
+              <p className="text-4xl font-extrabold text-indigo-600 mb-2">100%</p>
+              <p className="text-gray-700 font-medium">ID remapping preserved</p>
+            </div>
+            <div className="text-center">
+              <p className="text-4xl font-extrabold text-indigo-600 mb-2">AES-256</p>
+              <p className="text-gray-700 font-medium">Credential encryption</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Footer */}
       <footer className="bg-gray-900 text-gray-400 py-12">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <p className="text-sm">
-            &copy; {new Date().getFullYear()} GuestyMigrate. Not affiliated with Guesty Inc.
-          </p>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0">
+            <p className="text-sm">
+              &copy; {new Date().getFullYear()} GuestyMigrate. Not affiliated with Guesty Inc.
+            </p>
+            <div className="flex space-x-6 text-sm">
+              <a href="/terms" className="hover:text-white transition-colors">Terms of Service</a>
+              <a href="/privacy" className="hover:text-white transition-colors">Privacy Policy</a>
+              <a href="mailto:support@guestymigrate.com" className="hover:text-white transition-colors">Support</a>
+            </div>
+          </div>
         </div>
       </footer>
     </div>
