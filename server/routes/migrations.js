@@ -39,6 +39,13 @@ router.post('/preflight', async (req, res) => {
       ]);
 
       manifest = { listings, reservations, guests, owners, automations, tasks };
+
+      // Fetch full listings to count total photos
+      const allListings = await sourceClient.getAllListings();
+      const photoCount = allListings.reduce(
+        (sum, l) => sum + (Array.isArray(l.pictures) ? l.pictures.length : 0), 0
+      );
+      manifest.photos = photoCount;
     } catch (err) {
       return res.status(400).json({
         error: 'Failed to connect to source Guesty account',
