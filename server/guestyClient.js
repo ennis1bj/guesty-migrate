@@ -144,6 +144,19 @@ class GuestyClient {
     return this.request('POST', '/guests', data);
   }
 
+  async findGuestByEmail(email) {
+    try {
+      const data = await this.request(
+        'GET',
+        `/guests?filters[email]=${encodeURIComponent(email)}&limit=1`
+      );
+      const results = data.results || data;
+      return Array.isArray(results) ? results[0] : null;
+    } catch {
+      return null;
+    }
+  }
+
   async createOwner(data) {
     return this.request('POST', '/owners', data);
   }

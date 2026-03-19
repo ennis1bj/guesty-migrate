@@ -246,6 +246,23 @@ async function runMigration(migrationId) {
             totalPhotos.failed += photoStats.failed;
           }
         } catch (err) {
+          if (category === 'guests' && err.response?.status === 409) {
+            // Guest already exists in destination — try to find by email
+            try {
+              const email = item.email || item.emails?.[0]?.address;
+              if (email) {
+                const existing = await destClient.findGuestByEmail(email);
+                if (existing && (existing._id || existing.id)) {
+                  const existingId = existing._id || existing.id;
+                  idMap[sourceId] = existingId;
+                  migratedCount++; // count as success
+                  continue;
+                }
+              }
+            } catch (lookupErr) {
+              // fall through to failedCount
+            }
+          }
           failedCount++;
           errors.push({
             sourceId: item[categoryDef.idField],
