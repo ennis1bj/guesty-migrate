@@ -32,6 +32,8 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req, re
         console.log(`Migration ${migrationId} paid and enqueued`);
       } catch (err) {
         console.error('Error processing payment for migration:', err);
+        // Return 500 so Stripe retries the webhook instead of silently succeeding
+        return res.status(500).json({ error: 'Failed to enqueue migration' });
       }
     }
   }
