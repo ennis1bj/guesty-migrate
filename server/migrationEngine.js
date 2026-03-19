@@ -43,6 +43,16 @@ const CATEGORIES = {
     create: (client, data) => client.createCustomField(data),
     idField: '_id',
   },
+  fees: {
+    getAll: (client) => client.getAllFees(),
+    create: (client, data) => client.createFee(data),
+    idField: '_id',
+  },
+  taxes: {
+    getAll: (client) => client.getAllTaxes(),
+    create: (client, data) => client.createTax(data),
+    idField: '_id',
+  },
   listings: {
     getAll: (client) => client.getAllListings(),
     create: (client, data) => client.createListing(data),
@@ -133,7 +143,7 @@ const CATEGORIES = {
 };
 
 // Strict migration order for dependency resolution
-const MIGRATION_ORDER = ['custom_fields', 'listings', 'guests', 'owners', 'reservations', 'automations', 'tasks'];
+const MIGRATION_ORDER = ['custom_fields', 'fees', 'taxes', 'listings', 'guests', 'owners', 'reservations', 'automations', 'tasks'];
 
 async function updateStatus(migrationId, status, extra = {}) {
   const sets = ['status = $2'];

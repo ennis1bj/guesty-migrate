@@ -98,6 +98,22 @@ class GuestyClient {
     return this.request('POST', '/custom-fields', data);
   }
 
+  async getAllFees() {
+    return this.getAllPaginated('/fees', 'results');
+  }
+
+  async createFee(data) {
+    return this.request('POST', '/fees', data);
+  }
+
+  async getAllTaxes() {
+    return this.getAllPaginated('/taxes', 'results');
+  }
+
+  async createTax(data) {
+    return this.request('POST', '/taxes', data);
+  }
+
   async getAllListings() {
     return this.getAllPaginated('/listings', 'results');
   }

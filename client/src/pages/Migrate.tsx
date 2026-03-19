@@ -13,7 +13,7 @@ const STEPS = [
   { label: 'Progress', description: 'Migration' },
 ];
 
-const ALL_CATEGORIES = ['custom_fields', 'listings', 'guests', 'owners', 'reservations', 'automations', 'tasks'];
+const ALL_CATEGORIES = ['custom_fields', 'fees', 'taxes', 'listings', 'guests', 'owners', 'reservations', 'automations', 'tasks'];
 
 interface Pricing {
   tier: string;
