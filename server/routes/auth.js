@@ -25,14 +25,14 @@ router.post('/register',
 
       const passwordHash = await bcrypt.hash(password, 10);
       const result = await pool.query(
-        'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email, created_at',
+        'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email, is_demo, created_at',
         [email, passwordHash]
       );
 
       const user = result.rows[0];
       const token = generateToken(user);
 
-      res.status(201).json({ token, user: { id: user.id, email: user.email } });
+      res.status(201).json({ token, user: { id: user.id, email: user.email, is_demo: user.is_demo } });
     } catch (err) {
       console.error('Register error:', err);
       res.status(500).json({ error: 'Internal server error' });
@@ -52,7 +52,7 @@ router.post('/login',
 
       const { email, password } = req.body;
 
-      const result = await pool.query('SELECT id, email, password_hash FROM users WHERE email = $1', [email]);
+      const result = await pool.query('SELECT id, email, password_hash, is_demo FROM users WHERE email = $1', [email]);
       if (result.rows.length === 0) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
@@ -64,7 +64,7 @@ router.post('/login',
       }
 
       const token = generateToken(user);
-      res.json({ token, user: { id: user.id, email: user.email } });
+      res.json({ token, user: { id: user.id, email: user.email, is_demo: user.is_demo } });
     } catch (err) {
       console.error('Login error:', err);
       res.status(500).json({ error: 'Internal server error' });

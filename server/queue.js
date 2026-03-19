@@ -29,6 +29,14 @@ function initQueue() {
     const connection = { url: process.env.REDIS_URL };
 
     migrationQueue = new Queue('migrations', { connection });
+    migrationQueue.on('error', (err) => {
+      if (useRedis) {
+        console.warn('BullMQ Queue connection error — falling back to in-process:', err.message);
+        useRedis = false;
+        migrationQueue = null;
+        migrationWorker = null;
+      }
+    });
 
     migrationWorker = new Worker(
       'migrations',
@@ -44,7 +52,12 @@ function initQueue() {
     });
 
     migrationWorker.on('failed', (job, err) => {
-      console.error(`Migration job ${job.id} failed:`, err.message);
+      console.error(`Migration job ${job?.id} failed:`, err.message);
+    });
+
+    migrationWorker.on('error', (err) => {
+      console.warn('BullMQ Worker connection error — falling back to in-process:', err.message);
+      useRedis = false;
     });
 
     useRedis = true;

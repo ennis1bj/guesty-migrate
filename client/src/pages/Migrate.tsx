@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api';
+import { useAuth } from '../context/AuthContext';
 import StepWizard from '../components/StepWizard';
 import ManifestCard from '../components/ManifestCard';
 import ProgressBar from '../components/ProgressBar';
@@ -74,6 +75,8 @@ function calculatePerListingCents(listingCount: number): number {
 }
 
 export default function Migrate() {
+  const { user } = useAuth();
+  const isDemo = !!user?.is_demo;
   const [searchParams] = useSearchParams();
   const [currentStep, setCurrentStep] = useState(0);
   const [migrationId, setMigrationId] = useState<string | null>(null);
@@ -175,6 +178,20 @@ export default function Migrate() {
       window.location.href = data.checkoutUrl;
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to create checkout session');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDemoActivate = async () => {
+    if (!migrationId) return;
+    setError('');
+    setLoading(true);
+    try {
+      await api.post(`/migrations/${migrationId}/demo-activate`, { selectedCategories });
+      setCurrentStep(3);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to activate demo migration');
     } finally {
       setLoading(false);
     }
@@ -599,13 +616,28 @@ export default function Migrate() {
               Migrating {selectedCategories.length} categories: {selectedCategories.join(', ')}
             </p>
 
-            <button
-              onClick={handleCheckout}
-              disabled={loading}
-              className="w-full bg-amber-500 hover:bg-amber-600 text-slate-900 px-8 py-3 rounded-xl font-semibold shadow-sm hover:shadow-md disabled:opacity-50 transition-all duration-200"
-            >
-              {loading ? 'Redirecting...' : `Pay ${formatPrice(grandTotal)} & Start Migration`}
-            </button>
+            {isDemo ? (
+              <div className="space-y-3">
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 font-medium">
+                  Demo account — payment bypassed
+                </div>
+                <button
+                  onClick={handleDemoActivate}
+                  disabled={loading}
+                  className="w-full bg-amber-500 hover:bg-amber-600 text-slate-900 px-8 py-3 rounded-xl font-semibold shadow-sm hover:shadow-md disabled:opacity-50 transition-all duration-200"
+                >
+                  {loading ? 'Starting...' : 'Start Migration (Demo)'}
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={handleCheckout}
+                disabled={loading}
+                className="w-full bg-amber-500 hover:bg-amber-600 text-slate-900 px-8 py-3 rounded-xl font-semibold shadow-sm hover:shadow-md disabled:opacity-50 transition-all duration-200"
+              >
+                {loading ? 'Redirecting...' : `Pay ${formatPrice(grandTotal)} & Start Migration`}
+              </button>
+            )}
             <button
               onClick={() => setCurrentStep(1)}
               className="block mx-auto mt-4 text-sm text-slate-400 hover:text-slate-600"
