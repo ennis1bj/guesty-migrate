@@ -284,8 +284,10 @@ export default function Migrate() {
               <span className="text-blue-600 text-lg">{"\uD83D\uDCF7"}</span>
               <p className="text-sm text-blue-800">
                 <strong>{manifest.photos.toLocaleString()} photos</strong> found across
-                all listings — native listing photos will be migrated automatically.
-                Channel-connected listing photos re-sync when you reconnect channels.
+                all listings — native listing photos will be migrated automatically
+                when Listings is selected. Channel-connected listing photos re-sync
+                when you reconnect channels. Calendar blocks are also transferred
+                per listing.
               </p>
             </div>
           )}
