@@ -1,0 +1,9 @@
+process.env.JWT_SECRET = 'test-jwt-secret-that-is-long-enough-for-tests';
+process.env.ENCRYPTION_KEY = '0'.repeat(64);
+process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/test';
+process.env.STRIPE_SECRET_KEY = 'sk_test_fake';
+process.env.STRIPE_PRICE_STARTER = 'price_starter';
+process.env.STRIPE_PRICE_GROWTH = 'price_growth';
+process.env.STRIPE_PRICE_PROFESSIONAL = 'price_professional';
+process.env.STRIPE_PRICE_BUSINESS = 'price_business';
+process.env.STRIPE_PRICE_ENTERPRISE = 'price_enterprise';

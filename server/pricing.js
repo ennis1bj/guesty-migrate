@@ -6,31 +6,31 @@
  */
 
 const PRICING_TIERS = [
-  { tier: 'starter',         maxListings: 10,  amountCents: 14900,  displayPrice: '$149',   popular: false },
-  { tier: 'growth',          maxListings: 50,  amountCents: 34900,  displayPrice: '$349',   popular: false },
-  { tier: 'professional',    maxListings: 150, amountCents: 69900,  displayPrice: '$699',   popular: true },
-  { tier: 'business',        maxListings: 300, amountCents: 99900,  displayPrice: '$999',   popular: false },
-  { tier: 'enterprise',      maxListings: 500, amountCents: 149900, displayPrice: '$1,499', popular: false },
+  { tier: 'starter',      maxListings: 10,  amountCents: 14900,  displayPrice: '$149',   popular: false },
+  { tier: 'growth',       maxListings: 50,  amountCents: 34900,  displayPrice: '$349',   popular: false },
+  { tier: 'professional', maxListings: 150, amountCents: 69900,  displayPrice: '$699',   popular: true  },
+  { tier: 'business',     maxListings: 300, amountCents: 99900,  displayPrice: '$999',   popular: false },
+  { tier: 'enterprise',   maxListings: 500, amountCents: 149900, displayPrice: '$1,499', popular: false },
 ];
 
 const STRIPE_PRICE_ENV_KEYS = {
-  starter:       'STRIPE_PRICE_STARTER',
-  growth:        'STRIPE_PRICE_GROWTH',
-  professional:  'STRIPE_PRICE_PROFESSIONAL',
-  business:      'STRIPE_PRICE_BUSINESS',
-  enterprise:    'STRIPE_PRICE_ENTERPRISE',
+  starter:      'STRIPE_PRICE_STARTER',
+  growth:       'STRIPE_PRICE_GROWTH',
+  professional: 'STRIPE_PRICE_PROFESSIONAL',
+  business:     'STRIPE_PRICE_BUSINESS',
+  enterprise:   'STRIPE_PRICE_ENTERPRISE',
 };
 
 const ADDON_DEFINITIONS = [
-  { key: 'priority',  name: 'Priority Processing',        description: 'Skip the queue — your migration runs first.',                              priceCents: 9900,  envKey: 'STRIPE_PRICE_ADDON_PRIORITY' },
-  { key: 'support',   name: 'Dedicated Support & Review',  description: 'A migration specialist reviews your setup and assists during the process.', priceCents: 14900, envKey: 'STRIPE_PRICE_ADDON_SUPPORT' },
-  { key: 'remigrate', name: 'Re-Migration Pass',           description: 'One free re-run within 30 days if you need to migrate again.',              priceCents: 7900,  envKey: 'STRIPE_PRICE_ADDON_REMIGRATE' },
-  { key: 'verify',    name: 'Post-Migration Verify Call',  description: '30-minute video call to walk through your destination account.',            priceCents: 9900,  envKey: 'STRIPE_PRICE_ADDON_VERIFY' },
+  { key: 'priority',  name: 'Priority Processing',        description: 'Skip the queue — your migration runs first.',                              priceCents: 9900,  envKey: 'STRIPE_PRICE_ADDON_PRIORITY'  },
+  { key: 'support',   name: 'Dedicated Support & Review', description: 'A migration specialist reviews your setup and assists during the process.', priceCents: 14900, envKey: 'STRIPE_PRICE_ADDON_SUPPORT'   },
+  { key: 'remigrate', name: 'Re-Migration Pass',          description: 'One free re-run within 30 days if you need to migrate again.',              priceCents: 7900,  envKey: 'STRIPE_PRICE_ADDON_REMIGRATE' },
+  { key: 'verify',    name: 'Post-Migration Verify Call', description: '30-minute video call to walk through your destination account.',            priceCents: 9900,  envKey: 'STRIPE_PRICE_ADDON_VERIFY'    },
 ];
 
 /**
  * Get tier info from a listing count.
- * @param {number} count - Number of listings in the source account.
+ * @param {number} count
  * @returns {{ tier: string, amountCents?: number, priceEnvKey?: string, requiresQuote?: boolean }}
  */
 function getTierFromListings(count) {
