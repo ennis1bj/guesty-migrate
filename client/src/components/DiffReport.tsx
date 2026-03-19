@@ -13,8 +13,8 @@ interface DiffReportProps {
   report: Record<string, CategoryData>;
 }
 
-function isPhotoEntry(data: CategoryData): boolean {
-  return data.found !== undefined || data.migrated !== undefined;
+function isPhotoEntry(key: string, data: CategoryData): boolean {
+  return key === 'photos' || data.found !== undefined || data.migrated !== undefined;
 }
 
 export default function DiffReport({ report }: DiffReportProps) {
@@ -22,8 +22,8 @@ export default function DiffReport({ report }: DiffReportProps) {
     return <p className="text-gray-500 text-center py-8">No report data available.</p>;
   }
 
-  const standardEntries = Object.entries(report).filter(([, data]) => !isPhotoEntry(data));
-  const photoEntry = report.photos && isPhotoEntry(report.photos) ? report.photos : null;
+  const standardEntries = Object.entries(report).filter(([key, data]) => !isPhotoEntry(key, data));
+  const photoEntry = report.photos && isPhotoEntry('photos', report.photos) ? report.photos : null;
 
   const allMatch = standardEntries.every(([, r]) => r.match);
 
