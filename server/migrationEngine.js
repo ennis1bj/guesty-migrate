@@ -15,14 +15,23 @@ function getCategoryPath(category) {
   return paths[category] || `/${category}`;
 }
 
-const STRIP_FIELDS = ['_id', 'accountId', 'createdAt', 'updatedAt', 'channelListingId', 'importedAt'];
+const SOURCE_ONLY_FIELDS = new Set([
+  '_id', 'accountId', 'createdAt', 'updatedAt',
+  'channelListingId', 'importedAt', 'integrations',
+  'id',
+]);
 
-function stripFields(obj) {
-  const cleaned = { ...obj };
-  for (const field of STRIP_FIELDS) {
-    delete cleaned[field];
+function stripFieldsDeep(obj) {
+  if (Array.isArray(obj)) return obj.map(stripFieldsDeep);
+  if (obj && typeof obj === 'object') {
+    const cleaned = {};
+    for (const [key, val] of Object.entries(obj)) {
+      if (SOURCE_ONLY_FIELDS.has(key)) continue;
+      cleaned[key] = stripFieldsDeep(val);
+    }
+    return cleaned;
   }
-  return cleaned;
+  return obj;
 }
 
 const CATEGORIES = {
@@ -46,7 +55,7 @@ const CATEGORIES = {
     create: (client, data) => client.createReservation(data),
     idField: '_id',
     transform: (item, maps) => {
-      const cleaned = stripFields(item);
+      const cleaned = stripFieldsDeep(item);
       if (cleaned.listingId && maps.listings) {
         cleaned.listingId = maps.listings[cleaned.listingId] || cleaned.listingId;
       }
@@ -66,7 +75,7 @@ const CATEGORIES = {
     create: (client, data) => client.createTask(data),
     idField: '_id',
     transform: (item, maps) => {
-      const cleaned = stripFields(item);
+      const cleaned = stripFieldsDeep(item);
       if (cleaned.listingId && maps.listings) {
         cleaned.listingId = maps.listings[cleaned.listingId] || cleaned.listingId;
       }
@@ -153,7 +162,7 @@ async function runMigration(migrationId) {
           if (categoryDef.transform) {
             transformed = categoryDef.transform(item, idMaps);
           } else {
-            transformed = stripFields(item);
+            transformed = stripFieldsDeep(item);
           }
 
           const created = await categoryDef.create(destClient, transformed);
