@@ -84,11 +84,13 @@ async function updateStatus(migrationId, status, extra = {}) {
   await pool.query(`UPDATE migrations SET ${sets.join(', ')} WHERE id = $1`, values);
 }
 
-async function logCategory(migrationId, category, status, sourceCount, migratedCount, failedCount, errorDetails) {
+async function logCategory(migrationId, category, status, sourceCount, migratedCount, failedCount, errorDetails, photos = null) {
   await pool.query(
-    `INSERT INTO migration_logs (migration_id, category, status, source_count, migrated_count, failed_count, error_details)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [migrationId, category, status, sourceCount, migratedCount, failedCount, errorDetails ? JSON.stringify(errorDetails) : null]
+    `INSERT INTO migration_logs (migration_id, category, status, source_count, migrated_count, failed_count, error_details, photos)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [migrationId, category, status, sourceCount, migratedCount, failedCount,
+     errorDetails ? JSON.stringify(errorDetails) : null,
+     photos ? JSON.stringify(photos) : null]
   );
 }
 
@@ -114,6 +116,7 @@ async function runMigration(migrationId) {
   const idMaps = {};
   const results = {};
   let hasFailures = false;
+  const totalPhotos = { found: 0, migrated: 0, skipped: 0, failed: 0 };
 
   for (const category of MIGRATION_ORDER) {
     if (!selectedCategories.includes(category)) continue;
@@ -147,6 +150,37 @@ async function runMigration(migrationId) {
             idMap[sourceId] = newId;
           }
           migratedCount++;
+
+          // Photo migration for listings
+          if (category === 'listings') {
+            const photoStats = { found: 0, migrated: 0, skipped: 0, failed: 0 };
+
+            if (destClient.isChannelListing(item)) {
+              // Skip — channel will re-sync photos on reconnect
+              photoStats.skipped = (item.pictures || []).length;
+            } else {
+              const pictures = item.pictures || [];
+              photoStats.found = pictures.length;
+              for (const photoUrl of pictures) {
+                try {
+                  await destClient.uploadListingPhoto(newId, photoUrl);
+                  photoStats.migrated++;
+                } catch (photoErr) {
+                  photoStats.failed++;
+                  errors.push({
+                    sourceId: item[categoryDef.idField],
+                    photoUrl,
+                    error: photoErr.response?.data?.message || photoErr.message,
+                  });
+                }
+              }
+            }
+
+            totalPhotos.found += photoStats.found;
+            totalPhotos.migrated += photoStats.migrated;
+            totalPhotos.skipped += photoStats.skipped;
+            totalPhotos.failed += photoStats.failed;
+          }
         } catch (err) {
           failedCount++;
           errors.push({
@@ -161,7 +195,8 @@ async function runMigration(migrationId) {
 
       if (failedCount > 0) hasFailures = true;
 
-      await logCategory(migrationId, category, failedCount === 0 ? 'complete' : 'partial', sourceCount, migratedCount, failedCount, errors.length > 0 ? errors : null);
+      const photosForLog = category === 'listings' ? totalPhotos : null;
+      await logCategory(migrationId, category, failedCount === 0 ? 'complete' : 'partial', sourceCount, migratedCount, failedCount, errors.length > 0 ? errors : null, photosForLog);
 
       // Update results incrementally
       await updateStatus(migrationId, 'running', { results });
@@ -195,6 +230,14 @@ async function runMigration(migrationId) {
       };
     }
   }
+
+  // Add photos section to diff report
+  diffReport.photos = {
+    found: totalPhotos.found,
+    migrated: totalPhotos.migrated,
+    skipped_channel_managed: totalPhotos.skipped,
+    failed: totalPhotos.failed,
+  };
 
   const finalStatus = hasFailures ? 'complete_with_errors' : 'complete';
   await updateStatus(migrationId, finalStatus, { results, diff_report: diffReport });
