@@ -64,6 +64,7 @@ export default function Migrate() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [channelConfirmed, setChannelConfirmed] = useState(false);
 
   // Handle returning from Stripe checkout
   useEffect(() => {
@@ -233,9 +234,30 @@ export default function Migrate() {
             </div>
           </div>
 
+          <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+            <h3 className="font-semibold text-amber-900 mb-3">{"\u26A0\uFE0F"} Before you begin</h3>
+            <p className="text-sm text-amber-800 mb-3">
+              To avoid booking conflicts, disconnect your channels from the source
+              account before migrating. You can reconnect them to the destination
+              account after migration completes.
+            </p>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={channelConfirmed}
+                onChange={(e) => setChannelConfirmed(e.target.checked)}
+                className="w-4 h-4 text-indigo-600 rounded"
+              />
+              <span className="text-sm text-amber-900 font-medium">
+                I have disconnected all channels (Airbnb, Vrbo, Booking.com) from
+                the source Guesty account
+              </span>
+            </label>
+          </div>
+
           <button
             onClick={handlePreflight}
-            disabled={loading || !sourceClientId || !sourceClientSecret || !destClientId || !destClientSecret}
+            disabled={loading || !sourceClientId || !sourceClientSecret || !destClientId || !destClientSecret || !channelConfirmed}
             className="mt-6 bg-indigo-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
           >
             {loading ? 'Connecting...' : 'Connect & Analyze'}
