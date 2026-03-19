@@ -224,6 +224,7 @@ async function loadPreviousResults(migrationId) {
 }
 
 async function runMigration(migrationId) {
+  try {
   const migResult = await pool.query('SELECT * FROM migrations WHERE id = $1', [migrationId]);
   if (migResult.rows.length === 0) throw new Error(`Migration ${migrationId} not found`);
 
@@ -272,14 +273,13 @@ async function runMigration(migrationId) {
       const idMap = {};
 
       for (const item of sourceItems) {
+        const sourceId = item[categoryDef.idField];
         try {
           // Skip items that don't pass the category filter
           if (categoryDef.filter && !categoryDef.filter(item)) {
             skippedCount++;
             continue; // don't count as failed — just skip
           }
-
-          const sourceId = item[categoryDef.idField];
           let transformed;
 
           if (categoryDef.transform) {
@@ -442,6 +442,17 @@ async function runMigration(migrationId) {
   }
 
   console.log(`Migration ${migrationId} completed with status: ${finalStatus}`);
+  } catch (topLevelErr) {
+    // Top-level catch prevents migrations from being stuck in 'running' forever
+    console.error(`Migration ${migrationId} failed with unhandled error:`, topLevelErr);
+    try {
+      await updateStatus(migrationId, 'failed', {
+        error_message: topLevelErr.message || 'Unhandled migration error',
+      });
+    } catch (statusErr) {
+      console.error(`Failed to update migration ${migrationId} status:`, statusErr);
+    }
+  }
 }
 
 module.exports = { runMigration };
