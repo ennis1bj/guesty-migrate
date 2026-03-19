@@ -28,9 +28,9 @@ router.post('/preflight', async (req, res) => {
     try {
       await sourceClient.getAccessToken();
 
-      // Build manifest with counts
-      const [listings, reservations, guests, owners, automations, tasks] = await Promise.all([
-        sourceClient.getCount('/listings'),
+      // Fetch full listings (needed for photo count) and counts for the rest
+      const [allListings, reservations, guests, owners, automations, tasks] = await Promise.all([
+        sourceClient.getAllListings(),
         sourceClient.getCount('/reservations'),
         sourceClient.getCount('/guests'),
         sourceClient.getCount('/owners'),
@@ -38,14 +38,19 @@ router.post('/preflight', async (req, res) => {
         sourceClient.getCount('/tasks-open-api/tasks'),
       ]);
 
-      manifest = { listings, reservations, guests, owners, automations, tasks };
-
-      // Fetch full listings to count total photos
-      const allListings = await sourceClient.getAllListings();
       const photoCount = allListings.reduce(
         (sum, l) => sum + (Array.isArray(l.pictures) ? l.pictures.length : 0), 0
       );
-      manifest.photos = photoCount;
+
+      manifest = {
+        listings: allListings.length,
+        reservations,
+        guests,
+        owners,
+        automations,
+        tasks,
+        photos: photoCount,
+      };
     } catch (err) {
       return res.status(400).json({
         error: 'Failed to connect to source Guesty account',
