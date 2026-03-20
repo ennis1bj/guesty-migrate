@@ -35,9 +35,11 @@ async function sendEmail(to, subject, html) {
 
 // ── POST /api/auth/register ─────────────────────────────────────────────────
 
+const BCRYPT_ROUNDS = 12;
+
 router.post('/register',
   body('email').isEmail().normalizeEmail(),
-  body('password').isLength({ min: 6 }),
+  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
   async (req, res) => {
     try {
       const errors = validationResult(req);
@@ -52,8 +54,9 @@ router.post('/register',
         return res.status(409).json({ error: 'Email already registered' });
       }
 
-      const passwordHash = await bcrypt.hash(password, 10);
+      const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
       const verifyToken = crypto.randomBytes(32).toString('hex');
+      const hashedVerifyToken = crypto.createHash('sha256').update(verifyToken).digest('hex');
       const verifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
       const isDemo = process.env.NODE_ENV === 'test';
@@ -61,7 +64,7 @@ router.post('/register',
         `INSERT INTO users (email, password_hash, email_verified, verify_token, verify_token_expires, is_demo)
          VALUES ($1, $2, false, $3, $4, $5)
          RETURNING id, email, is_demo, email_verified, created_at`,
-        [email, passwordHash, verifyToken, verifyExpires, isDemo]
+        [email, passwordHash, hashedVerifyToken, verifyExpires, isDemo]
       );
 
       const user = result.rows[0];
@@ -98,11 +101,12 @@ router.post('/register',
 router.get('/verify/:token', async (req, res) => {
   try {
     const { token } = req.params;
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
     const result = await pool.query(
       `UPDATE users SET email_verified = true, verify_token = NULL, verify_token_expires = NULL
        WHERE verify_token = $1 AND verify_token_expires > NOW()
        RETURNING id, email`,
-      [token]
+      [hashedToken]
     );
 
     if (result.rows.length === 0) {
@@ -170,11 +174,12 @@ router.post('/forgot-password',
       }
 
       const resetToken = crypto.randomBytes(32).toString('hex');
+      const hashedResetToken = crypto.createHash('sha256').update(resetToken).digest('hex');
       const resetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
       await pool.query(
         'UPDATE users SET reset_token = $1, reset_token_expires = $2 WHERE email = $3',
-        [resetToken, resetExpires, email]
+        [hashedResetToken, resetExpires, email]
       );
 
       const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
@@ -203,7 +208,7 @@ router.post('/forgot-password',
 
 router.post('/reset-password',
   body('token').notEmpty(),
-  body('password').isLength({ min: 6 }),
+  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
   async (req, res) => {
     try {
       const errors = validationResult(req);
@@ -212,13 +217,14 @@ router.post('/reset-password',
       }
 
       const { token, password } = req.body;
-      const passwordHash = await bcrypt.hash(password, 10);
+      const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+      const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
 
       const result = await pool.query(
         `UPDATE users SET password_hash = $1, reset_token = NULL, reset_token_expires = NULL
          WHERE reset_token = $2 AND reset_token_expires > NOW()
          RETURNING id, email`,
-        [passwordHash, token]
+        [passwordHash, hashedToken]
       );
 
       if (result.rows.length === 0) {
@@ -270,9 +276,22 @@ router.delete('/account', authenticateToken, async (req, res) => {
     const userId = req.user.id;
     await client.query('BEGIN');
 
+    // Delete beta invoices for this user
+    await client.query('DELETE FROM beta_invoices WHERE user_id = $1', [userId]);
+
     // Delete migration logs for all of this user's migrations
     await client.query(
       `DELETE FROM migration_logs WHERE migration_id IN (SELECT id FROM migrations WHERE user_id = $1)`,
+      [userId]
+    );
+
+    // Clean up token_cache entries for credentials used by this user's migrations
+    await client.query(
+      `DELETE FROM token_cache WHERE client_id IN (
+        SELECT source_client_id FROM migrations WHERE user_id = $1
+        UNION
+        SELECT dest_client_id FROM migrations WHERE user_id = $1
+      )`,
       [userId]
     );
 
