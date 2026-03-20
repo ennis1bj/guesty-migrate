@@ -212,7 +212,27 @@ const faqs = [
   },
 ];
 
-/* ───────────────────────── Component ───────────────────────── */
+/* ───────────────────────── API response types ───────────────────────── */
+
+interface PricingApiTier {
+  tier: string;
+  maxListings: number | null;
+  amountCents: number | null;
+  popular?: boolean;
+}
+
+interface PricingApiAddOn {
+  key: string;
+  name: string;
+  priceCents: number | null;
+}
+
+interface PricingApiResponse {
+  tiers: PricingApiTier[];
+  addOns?: PricingApiAddOn[];
+}
+
+/* ───────────────────────── Component types ───────────────────────── */
 
 interface PricingTier {
   name: string;
@@ -238,9 +258,9 @@ export default function Landing() {
   const [pricingLoading, setPricingLoading] = useState(true);
 
   useEffect(() => {
-    api.get('/pricing')
+    api.get<PricingApiResponse>('/pricing')
       .then(({ data }) => {
-        const tiers: PricingTier[] = data.tiers.map((t: any, i: number) => ({
+        const tiers: PricingTier[] = data.tiers.map((t: PricingApiTier, i: number) => ({
           name: formatTierName(t.tier),
           listings: formatListingRange(t.maxListings, i, data.tiers),
           price: formatPrice(t.amountCents),
@@ -251,7 +271,7 @@ export default function Landing() {
         setPricingTiers(tiers);
 
         if (data.addOns?.length) {
-          const mapped: AddOn[] = data.addOns.map((a: any) => ({
+          const mapped: AddOn[] = data.addOns.map((a: PricingApiAddOn) => ({
             name: a.name,
             price: formatPrice(a.priceCents),
             description: addOnDescriptions[a.key] || a.name,
