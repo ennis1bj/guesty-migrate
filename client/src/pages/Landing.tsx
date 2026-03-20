@@ -256,6 +256,7 @@ export default function Landing() {
   const [pricingTiers, setPricingTiers] = useState<PricingTier[]>(fallbackTiers);
   const [addOns, setAddOns] = useState<AddOn[]>(fallbackAddOns);
   const [pricingLoading, setPricingLoading] = useState(true);
+  const [previewStep, setPreviewStep] = useState(0);
 
   useEffect(() => {
     api.get<PricingApiResponse>('/pricing')
@@ -399,7 +400,7 @@ export default function Landing() {
       {/* ── See It In Action ──────────────────────────────────── */}
       <section className="py-20 sm:py-24 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
+          <div className="text-center mb-12">
             <h2 className="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight mb-4">
               See It In Action
             </h2>
@@ -408,7 +409,252 @@ export default function Landing() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-5xl mx-auto">
+          {/* Step tab selector */}
+          <div className="flex justify-center mb-8">
+            <div className="inline-flex gap-1 bg-stone-100 rounded-xl p-1">
+              {[
+                { n: '1', label: 'Connect' },
+                { n: '2', label: 'Review' },
+                { n: '3', label: 'Pay' },
+                { n: '4', label: 'Track' },
+              ].map(({ n, label }, i) => (
+                <button
+                  key={i}
+                  onClick={() => setPreviewStep(i)}
+                  className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 ${
+                    previewStep === i
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                    previewStep === i ? 'bg-amber-500 text-slate-900' : 'bg-stone-300 text-slate-600'
+                  }`}>{n}</span>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Browser frame */}
+          <div className="max-w-5xl mx-auto rounded-2xl overflow-hidden shadow-xl ring-1 ring-stone-200">
+            {/* Browser chrome */}
+            <div className="bg-stone-100 border-b border-stone-200 px-4 py-3 flex items-center gap-3">
+              <div className="flex gap-1.5">
+                <div className="w-3 h-3 rounded-full bg-stone-300" />
+                <div className="w-3 h-3 rounded-full bg-stone-300" />
+                <div className="w-3 h-3 rounded-full bg-stone-300" />
+              </div>
+              <div className="flex-1 bg-white rounded-md px-4 py-1.5 text-xs text-stone-400 font-mono text-center max-w-xs mx-auto">
+                app.guestymigrate.com/migrate
+              </div>
+            </div>
+
+            {/* Wizard step indicator */}
+            <div className="bg-white border-b border-stone-100 px-6 py-3">
+              <div className="flex items-center justify-center gap-1">
+                {['Credentials', 'Review', 'Payment', 'Progress'].map((s, i) => (
+                  <div key={s} className="flex items-center">
+                    <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold ${
+                      i === previewStep ? 'bg-amber-500 text-slate-900' : i < previewStep ? 'bg-stone-100 text-slate-500' : 'text-slate-400'
+                    }`}>
+                      <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                        i < previewStep ? 'bg-emerald-500 text-white' : i === previewStep ? 'bg-slate-900 text-white' : 'bg-stone-200 text-slate-500'
+                      }`}>{i < previewStep ? '✓' : i + 1}</span>
+                      <span className="hidden sm:inline">{s}</span>
+                    </div>
+                    {i < 3 && <div className={`w-6 h-px mx-1 ${i < previewStep ? 'bg-emerald-400' : 'bg-stone-200'}`} />}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Step content */}
+            <div className="bg-[#fafaf8] px-6 py-6">
+
+              {/* ── Step 1: Credentials ── */}
+              {previewStep === 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 max-w-3xl mx-auto">
+                  {[
+                    { label: 'Source Account', sub: 'The account you are migrating FROM', validated: true },
+                    { label: 'Destination Account', sub: 'The account you are migrating TO', validated: false },
+                  ].map((acct) => (
+                    <div key={acct.label} className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${acct.validated ? 'bg-emerald-500' : 'bg-stone-300'}`} />
+                        <h4 className="text-sm font-bold text-slate-900">{acct.label}</h4>
+                      </div>
+                      <p className="text-xs text-slate-400 mb-4">{acct.sub}</p>
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Client ID</label>
+                          <div className="w-full border border-stone-200 rounded-xl px-3 py-2 text-xs text-slate-500 bg-stone-50 font-mono truncate">
+                            {acct.validated ? 'gst_live_4Xk9mNpQ2rT•••' : <span className="text-stone-400 italic">Enter your Client ID</span>}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Client Secret</label>
+                          <div className="w-full border border-stone-200 rounded-xl px-3 py-2 text-xs text-slate-500 bg-stone-50">
+                            {acct.validated ? '••••••••••••••••' : <span className="text-stone-400 italic">Enter your Client Secret</span>}
+                          </div>
+                        </div>
+                        {acct.validated ? (
+                          <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl px-3 py-2 text-xs font-semibold">
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                            Validated — 47 listings found
+                          </div>
+                        ) : (
+                          <div className="w-full bg-amber-500 text-slate-900 font-semibold py-2 rounded-xl text-xs text-center">
+                            Validate Account
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* ── Step 2: Review Manifest ── */}
+              {previewStep === 1 && (
+                <div className="max-w-3xl mx-auto bg-white border border-stone-200 rounded-2xl shadow-sm overflow-hidden">
+                  <div className="px-5 py-4 border-b border-stone-100">
+                    <h4 className="text-sm font-bold text-slate-900">Your Migration Manifest</h4>
+                    <p className="text-xs text-slate-500 mt-0.5">Review what will be migrated. Deselect any categories you don't need.</p>
+                  </div>
+                  <table className="w-full">
+                    <thead className="bg-stone-50 border-b border-stone-100">
+                      <tr>
+                        <th className="text-left px-5 py-2.5 text-xs font-semibold text-slate-500">Data Category</th>
+                        <th className="text-right px-5 py-2.5 text-xs font-semibold text-slate-500">Source Count</th>
+                        <th className="text-center px-5 py-2.5 text-xs font-semibold text-slate-500">Include</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-50">
+                      {[
+                        { cat: 'Listings', count: '47', on: true },
+                        { cat: 'Photos', count: '1,842', on: true },
+                        { cat: 'Guests', count: '312', on: true },
+                        { cat: 'Reservations', count: '486', on: true },
+                        { cat: 'Rate Strategies', count: '14', on: true },
+                        { cat: 'Automations', count: '22', on: true },
+                        { cat: 'Calendar Blocks', count: '203', on: false },
+                      ].map((row) => (
+                        <tr key={row.cat} className="hover:bg-stone-50">
+                          <td className="px-5 py-2.5 text-xs font-medium text-slate-700">{row.cat}</td>
+                          <td className="px-5 py-2.5 text-right text-xs text-slate-500 font-mono">{row.count}</td>
+                          <td className="px-5 py-2.5 text-center">
+                            <div className={`inline-flex w-8 h-4 rounded-full items-center px-0.5 ${row.on ? 'bg-amber-500 justify-end' : 'bg-stone-200 justify-start'}`}>
+                              <div className="w-3 h-3 rounded-full bg-white shadow-sm" />
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="px-5 py-3 border-t border-stone-100 bg-stone-50 flex justify-between items-center">
+                    <p className="text-xs text-slate-500">6 of 7 categories selected</p>
+                    <div className="bg-amber-500 text-slate-900 font-semibold px-4 py-1.5 rounded-lg text-xs">Continue to Payment →</div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Step 3: Payment ── */}
+              {previewStep === 2 && (
+                <div className="max-w-3xl mx-auto space-y-4">
+                  <div className="grid grid-cols-3 gap-3">
+                    {[
+                      { name: 'Growth',       range: '11 – 50',   price: '$349', popular: false },
+                      { name: 'Professional', range: '51 – 150',  price: '$699', popular: true  },
+                      { name: 'Business',     range: '151 – 300', price: '$999', popular: false },
+                    ].map((t) => (
+                      <div key={t.name} className={`bg-white rounded-2xl p-4 border transition-all ${t.popular ? 'ring-2 ring-amber-500 shadow-md' : 'border-stone-200'}`}>
+                        {t.popular && <span className="inline-block bg-amber-500 text-slate-900 text-[10px] font-bold px-2 py-0.5 rounded-full mb-2 uppercase tracking-wide">Most Popular</span>}
+                        <h4 className="text-sm font-bold text-slate-900 mb-0.5">{t.name}</h4>
+                        <p className="text-xs text-slate-400 mb-2">{t.range} listings</p>
+                        <p className="text-2xl font-extrabold text-slate-900 mb-3">{t.price}</p>
+                        <div className={`w-full py-1.5 rounded-xl text-xs font-semibold text-center ${t.popular ? 'bg-amber-500 text-slate-900' : 'bg-stone-100 text-slate-700'}`}>
+                          Select Plan
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="bg-white border border-stone-200 rounded-2xl px-5 py-4 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-slate-500">Total due today</p>
+                      <p className="text-xl font-extrabold text-slate-900">$699</p>
+                    </div>
+                    <div className="flex items-center gap-1.5 bg-amber-500 text-slate-900 font-semibold px-5 py-2 rounded-xl text-sm">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                      Pay Securely via Stripe
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Step 4: Progress ── */}
+              {previewStep === 3 && (
+                <div className="max-w-3xl mx-auto bg-white border border-stone-200 rounded-2xl shadow-sm overflow-hidden">
+                  <div className="px-5 py-4 border-b border-stone-100 flex items-center justify-between">
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900">Migration In Progress</h4>
+                      <p className="text-xs text-slate-500 mt-0.5">Migrating 47 listings across 11 data categories</p>
+                    </div>
+                    <span className="flex items-center gap-1.5 text-xs font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-full">
+                      <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
+                      Running
+                    </span>
+                  </div>
+                  <div className="px-5 py-4 space-y-3">
+                    {[
+                      { label: 'Custom Fields',    pct: 100, status: 'complete' },
+                      { label: 'Rate Strategies',  pct: 100, status: 'complete' },
+                      { label: 'Listings',         pct: 100, status: 'complete' },
+                      { label: 'Photos',           pct: 68,  status: 'running'  },
+                      { label: 'Guests',           pct: 100, status: 'complete' },
+                      { label: 'Reservations',     pct: 41,  status: 'running'  },
+                      { label: 'Automations',      pct: 0,   status: 'pending'  },
+                    ].map((row) => (
+                      <div key={row.label}>
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-xs font-medium text-slate-700">{row.label}</span>
+                          <span className={`text-xs font-semibold ${row.status === 'complete' ? 'text-emerald-600' : row.status === 'running' ? 'text-amber-600' : 'text-slate-400'}`}>
+                            {row.status === 'complete' ? '✓ Complete' : row.status === 'running' ? `${row.pct}%` : 'Pending'}
+                          </span>
+                        </div>
+                        <div className="h-1.5 bg-stone-100 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${row.status === 'complete' ? 'bg-emerald-500' : row.status === 'running' ? 'bg-amber-500' : 'bg-stone-200'}`} style={{ width: `${row.pct}%` }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="px-5 py-4 border-t border-stone-100 bg-emerald-50">
+                    <p className="text-xs text-emerald-700 font-semibold">You can safely close this tab.</p>
+                    <p className="text-xs text-emerald-600 mt-0.5">The migration runs in the background. We'll email you when it's done and your verification report is ready.</p>
+                  </div>
+                </div>
+              )}
+
+            </div>
+          </div>
+
+          {/* Step description */}
+          <div className="mt-8 text-center max-w-xl mx-auto">
+            {[
+              { title: 'Connect & Validate', desc: 'Enter your source and destination Guesty API credentials. Both accounts are verified instantly before anything moves.' },
+              { title: 'Review Your Manifest', desc: 'See exactly what data will migrate — listings, guests, reservations, photos, and more. Select only the categories you need.' },
+              { title: 'Choose Pricing & Pay', desc: 'Pick flat-rate or per-listing pricing. Add optional extras. Pay securely via Stripe — no subscription, no hidden fees.' },
+              { title: 'Track Progress & Verify', desc: 'Watch real-time progress bars per category, then review the full verification diff report to confirm everything transferred correctly.' },
+            ].map((s, i) => (
+              previewStep === i && (
+                <div key={i}>
+                  <h3 className="text-xl font-bold text-slate-900 mb-2">{s.title}</h3>
+                  <p className="text-slate-500 leading-relaxed">{s.desc}</p>
+                </div>
+              )
+            ))}
+          </div>
+
+          <div className="hidden">
 
             {/* Step 1 — Connect & Validate */}
             <div className="bg-[#fafaf8] border border-stone-200 rounded-2xl overflow-hidden">
@@ -551,12 +797,7 @@ export default function Landing() {
                   </div>
                 ))}
               </div>
-              <div className="p-5">
-                <h3 className="text-lg font-bold text-slate-900 mb-1">Track Progress &amp; Verify</h3>
-                <p className="text-slate-500 text-sm leading-relaxed">Watch real-time progress bars per category, then review the verification diff report.</p>
-              </div>
             </div>
-
           </div>
         </div>
       </section>
@@ -646,76 +887,6 @@ export default function Landing() {
                 </tr>
               </tbody>
             </table>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Social Proof / Testimonials ─────────────────────── */}
-      <section className="py-20 sm:py-24 bg-[#fafaf8]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight mb-4">
-              Trusted by Property Managers
-            </h2>
-            <p className="text-lg text-slate-500 max-w-2xl mx-auto">
-              See what property managers say about their migration experience.
-            </p>
-          </div>
-
-          {/* Testimonial Cards — replace these placeholder quotes with real testimonials */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto mb-16">
-            {[
-              { quote: 'We migrated 45 listings with all reservations and automations intact. The whole process took under 20 minutes.', name: 'Example User', role: 'Property Manager, 45 listings', note: 'Replace with real testimonial' },
-              { quote: 'The verification report gave us full confidence that everything transferred correctly. No manual cleanup needed.', name: 'Example User', role: 'Operations Director, 120 listings', note: 'Replace with real testimonial' },
-              { quote: 'We tried doing it manually and gave up after a week. GuestyMigrate handled everything in one session — photos, calendar blocks, the works.', name: 'Example User', role: 'Agency Owner, 200+ listings', note: 'Replace with real testimonial' },
-            ].map((t, i) => (
-              <div key={i} className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm">
-                {/* Placeholder indicator — remove when replacing with real testimonials */}
-                <span className="inline-block bg-amber-100 text-amber-700 text-xs font-medium px-2 py-0.5 rounded mb-3">{t.note}</span>
-                <svg className="w-8 h-8 text-amber-400 mb-3" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983z" />
-                </svg>
-                <p className="text-slate-600 leading-relaxed mb-4">{t.quote}</p>
-                <div>
-                  <p className="font-semibold text-slate-900">{t.name}</p>
-                  <p className="text-sm text-slate-400">{t.role}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Trust / Stats Bar */}
-          <div className="bg-white border border-stone-200 rounded-2xl p-6 max-w-4xl mx-auto">
-            <div className="flex flex-wrap justify-center items-center gap-8 sm:gap-12">
-              <div className="text-center">
-                <p className="text-3xl font-extrabold text-amber-500">500+</p>
-                <p className="text-sm text-slate-500 font-medium">Listings Migrated</p>
-              </div>
-              <div className="w-px h-10 bg-stone-200 hidden sm:block" />
-              <div className="text-center">
-                <p className="text-3xl font-extrabold text-amber-500">100%</p>
-                <p className="text-sm text-slate-500 font-medium">Data Verified</p>
-              </div>
-              <div className="w-px h-10 bg-stone-200 hidden sm:block" />
-              <div className="text-center">
-                <p className="text-3xl font-extrabold text-amber-500">AES-256</p>
-                <p className="text-sm text-slate-500 font-medium">Encrypted</p>
-              </div>
-            </div>
-            <div className="flex flex-wrap justify-center items-center gap-6 mt-6 pt-6 border-t border-stone-100">
-              <div className="flex items-center gap-2 text-slate-500">
-                <svg className="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                </svg>
-                <span className="text-sm font-semibold">Stripe Secured Payments</span>
-              </div>
-              <div className="flex items-center gap-2 text-slate-500">
-                <svg className="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                </svg>
-                <span className="text-sm font-semibold">GDPR Compliant</span>
-              </div>
-            </div>
           </div>
         </div>
       </section>

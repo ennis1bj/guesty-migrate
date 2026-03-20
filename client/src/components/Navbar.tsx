@@ -138,7 +138,7 @@ export default function Navbar() {
           ) : (
             <>
               <a
-                href="#pricing"
+                href="/#pricing"
                 className="block text-slate-300 hover:text-white text-sm font-medium py-2"
                 onClick={() => setMobileOpen(false)}
               >
