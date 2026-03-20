@@ -50,10 +50,22 @@ THE SERVICE IS PROVIDED "AS IS" AND "AS AVAILABLE" WITHOUT WARRANTIES OF ANY KIN
 
 IN NO EVENT SHALL GUESTYMIGRATE BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR ANY LOSS OF DATA, REVENUE, OR PROFITS, WHETHER DIRECT OR INDIRECT, ARISING OUT OF YOUR USE OF THE SERVICE.
 
-## 10. Changes to Terms
+## 10. Account Termination
+
+We reserve the right to suspend or terminate your account at any time if you violate these Terms, misuse the Service, or engage in fraudulent activity. Upon termination, your right to use the Service ceases immediately. You may delete your account at any time via the self-serve account deletion endpoint.
+
+## 11. Indemnification
+
+You agree to indemnify, defend, and hold harmless GuestyMigrate, its affiliates, and their respective officers, directors, and employees from any claims, damages, losses, or expenses (including reasonable attorneys' fees) arising out of your use of the Service, including but not limited to unauthorized data migration or violation of any third-party rights.
+
+## 12. Governing Law
+
+These Terms are governed by and construed in accordance with the laws of the State of Michigan, United States, without regard to its conflict of law provisions. Any disputes arising under these Terms shall be resolved in the state or federal courts located in Kent County, Michigan.
+
+## 13. Changes to Terms
 
 We reserve the right to modify these Terms at any time. Continued use of the Service after changes constitutes acceptance of the updated Terms.
 
-## 11. Contact
+## 14. Contact
 
 For questions about these Terms, contact us at support@guestymigrate.com.

@@ -82,19 +82,41 @@ We use the following third-party services:
 - We use browser `localStorage` to store authentication tokens (JWT) for session persistence.
 - We do not use third-party tracking cookies or analytics.
 
-## 9. International Data Transfers
+## 9. Lawful Basis for Processing (GDPR)
 
-If you are located outside the United States, please be aware that your data may be transferred to and processed in the United States.
+We process your personal data under the following lawful bases as defined by GDPR Article 6:
 
-## 10. Children's Privacy
+- **Contract performance**: Processing your account information and API credentials is necessary to provide the migration service you requested.
+- **Legitimate interests**: We process migration logs and technical data for service improvement, fraud prevention, and support purposes.
+- **Consent**: Where required, we obtain your explicit consent for data processing (e.g., at registration).
+
+## 10. Data Breach Notification
+
+In the event of a personal data breach that is likely to result in a risk to your rights and freedoms, we will notify the relevant supervisory authority within 72 hours of becoming aware of the breach, as required by GDPR Article 33. If the breach is likely to result in a high risk to you, we will also notify you directly without undue delay.
+
+## 11. International Data Transfers
+
+If you are located outside the United States, please be aware that your data may be transferred to and processed in the United States. Where personal data is transferred from the EEA/UK to the US, we rely on Standard Contractual Clauses (SCCs) approved by the European Commission as the legal mechanism for such transfers.
+
+## 12. California Residents (CCPA)
+
+If you are a California resident, you have the right to:
+
+- **Know** what personal information we collect about you and how it is used.
+- **Delete** your personal information (see Self-Serve Data Rights above).
+- **Non-discrimination** for exercising your privacy rights.
+
+We do not sell personal information. To exercise your rights, contact us at privacy@guestymigrate.com or use the self-serve endpoints described above.
+
+## 13. Children's Privacy
 
 The Service is not intended for use by individuals under the age of 18.
 
-## 11. Changes to This Policy
+## 14. Changes to This Policy
 
 We may update this Privacy Policy from time to time. Changes will be posted on this page with an updated revision date.
 
-## 12. Contact
+## 15. Contact
 
 For privacy-related inquiries:
 - Email: privacy@guestymigrate.com
