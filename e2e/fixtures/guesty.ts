@@ -150,6 +150,81 @@ export const test = base.extend<GuestyFixtures>({
 
 export { expect } from '@playwright/test';
 
+// ── Admin API mock data ───────────────────────────────────────────────────────
+
+export const MOCK_BETA_USER_ID  = 'u-beta-001';
+export const MOCK_INVOICE_ID    = 'in-mock-001';
+export const MOCK_INVOICE_URL   = 'https://invoice.stripe.com/mock';
+
+export const ADMIN_RESPONSES = {
+  betaParticipants: {
+    participants: [
+      {
+        id: MOCK_BETA_USER_ID,
+        email: 'beta@example.com',
+        is_beta: true,
+        beta_starts_at: '2026-01-01T00:00:00Z',
+        beta_expires_at: '2027-01-01T00:00:00Z',
+        beta_notes: 'E2E test participant',
+        beta_status: 'active',
+        invoices: [],
+      },
+    ],
+  },
+  betaEmpty:   { participants: [] },
+  grantBeta:   { success: true, userId: MOCK_BETA_USER_ID, email: 'newbeta@example.com' },
+  extendBeta:  { success: true, id: MOCK_BETA_USER_ID, email: 'beta@example.com', beta_expires_at: '2028-01-01T00:00:00Z' },
+  revokeBeta:  { success: true, id: MOCK_BETA_USER_ID, email: 'beta@example.com' },
+  createInvoice: {
+    success: true,
+    invoiceId: MOCK_INVOICE_ID,
+    invoiceUrl: MOCK_INVOICE_URL,
+    status: 'open',
+  },
+  searchUsers: {
+    users: [
+      { id: MOCK_BETA_USER_ID, email: 'beta@example.com', is_beta: true, beta_expires_at: '2027-01-01', is_admin: false, created_at: '2026-01-15' },
+      { id: 'u-admin-001',     email: 'admin@example.com', is_beta: false, beta_expires_at: null,       is_admin: true,  created_at: '2025-12-01' },
+    ],
+  },
+};
+
+// ── Admin fixture ─────────────────────────────────────────────────────────────
+
+export type AdminFixtures = { adminRoutes: void };
+
+export const adminTest = base.extend<AdminFixtures>({
+  adminRoutes: async ({ context }, use) => {
+    const ar = ADMIN_RESPONSES;
+
+    await context.route('**/api/admin/beta', (r) =>
+      r.fulfill({ json: ar.betaParticipants })
+    );
+
+    await context.route('**/api/admin/beta/grant', (r) =>
+      r.fulfill({ json: ar.grantBeta })
+    );
+
+    await context.route('**/api/admin/beta/*/extend', (r) =>
+      r.fulfill({ json: ar.extendBeta })
+    );
+
+    await context.route('**/api/admin/beta/*/revoke', (r) =>
+      r.fulfill({ json: ar.revokeBeta })
+    );
+
+    await context.route('**/api/admin/beta/*/invoice', (r) =>
+      r.fulfill({ json: ar.createInvoice })
+    );
+
+    await context.route('**/api/admin/users/search*', (r) =>
+      r.fulfill({ json: ar.searchUsers })
+    );
+
+    await use();
+  },
+});
+
 // ── HTTP mock server (backend-level Guesty interception, GUESTY_BASE_URL mode) ─
 
 function jsonReply(res: http.ServerResponse, status: number, data: unknown) {
