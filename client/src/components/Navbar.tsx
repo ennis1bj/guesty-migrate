@@ -33,13 +33,23 @@ export default function Navbar() {
                 <Link to="/dashboard" className="text-slate-300 hover:text-white text-sm font-medium transition-colors">
                   Dashboard
                 </Link>
+                {user?.is_admin && (
+                  <Link to="/admin" className="text-purple-400 hover:text-purple-300 text-sm font-medium transition-colors">
+                    Admin
+                  </Link>
+                )}
                 <Link
                   to="/migrate"
                   className="bg-amber-500 hover:bg-amber-600 text-slate-900 px-5 py-2 rounded-xl text-sm font-semibold transition-all duration-200 shadow-sm hover:shadow-md"
                 >
                   New Migration
                 </Link>
-                <span className="text-slate-400 text-sm">{user?.email}</span>
+                <div className="flex items-center gap-2">
+                  {user?.is_beta && (
+                    <span className="bg-purple-500/20 text-purple-300 text-xs font-bold px-2 py-0.5 rounded-full">BETA</span>
+                  )}
+                  <span className="text-slate-400 text-sm">{user?.email}</span>
+                </div>
                 <button
                   onClick={handleLogout}
                   className="text-slate-400 hover:text-white text-sm font-medium transition-colors"
@@ -96,6 +106,15 @@ export default function Navbar() {
               >
                 Dashboard
               </Link>
+              {user?.is_admin && (
+                <Link
+                  to="/admin"
+                  className="block text-purple-400 hover:text-purple-300 text-sm font-medium py-2"
+                  onClick={() => setMobileOpen(false)}
+                >
+                  Admin
+                </Link>
+              )}
               <Link
                 to="/migrate"
                 className="block bg-amber-500 hover:bg-amber-600 text-slate-900 px-5 py-2.5 rounded-xl text-sm font-semibold text-center transition-all"
@@ -103,7 +122,12 @@ export default function Navbar() {
               >
                 New Migration
               </Link>
-              <span className="block text-slate-400 text-sm py-1">{user?.email}</span>
+              <div className="flex items-center gap-2 py-1">
+                {user?.is_beta && (
+                  <span className="bg-purple-500/20 text-purple-300 text-xs font-bold px-2 py-0.5 rounded-full">BETA</span>
+                )}
+                <span className="text-slate-400 text-sm">{user?.email}</span>
+              </div>
               <button
                 onClick={handleLogout}
                 className="block text-slate-400 hover:text-white text-sm font-medium py-2 w-full text-left"

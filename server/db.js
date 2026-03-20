@@ -102,6 +102,38 @@ const migrate = async () => {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS is_demo BOOLEAN DEFAULT false;
     `);
 
+    // ── Beta access columns ─────────────────────────────────────────────────
+    await client.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_beta BOOLEAN DEFAULT false;
+    `);
+    await client.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS beta_starts_at TIMESTAMPTZ;
+    `);
+    await client.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS beta_expires_at TIMESTAMPTZ;
+    `);
+    await client.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS beta_notes TEXT;
+    `);
+    await client.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT false;
+    `);
+
+    // ── Beta invoices table ─────────────────────────────────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS beta_invoices (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID REFERENCES users(id),
+        stripe_invoice_id TEXT,
+        description TEXT,
+        amount_cents INT NOT NULL,
+        due_date DATE,
+        status TEXT DEFAULT 'draft',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
     console.log('Database migrations completed successfully');
   } finally {
     client.release();

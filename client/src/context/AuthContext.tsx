@@ -5,6 +5,9 @@ interface User {
   id: string;
   email: string;
   is_demo?: boolean;
+  is_beta?: boolean;
+  beta_expires_at?: string | null;
+  is_admin?: boolean;
 }
 
 interface AuthContextType {

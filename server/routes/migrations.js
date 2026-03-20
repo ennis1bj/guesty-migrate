@@ -141,6 +141,27 @@ router.post('/:id/checkout', async (req, res) => {
     const migration = migResult.rows[0];
     const manifest = migration.manifest;
 
+    // ── Beta users bypass payment entirely ───────────────────────────────────────
+    const betaCheck = await pool.query(
+      `SELECT is_beta, beta_expires_at FROM users WHERE id = $1`,
+      [req.user.id]
+    );
+    const betaUser = betaCheck.rows[0];
+    if (betaUser?.is_beta && betaUser.beta_expires_at && new Date(betaUser.beta_expires_at) > new Date()) {
+      // Beta user — skip payment, mark as paid, enqueue
+      await pool.query(
+        `UPDATE migrations SET status = 'paid', selected_categories = $1, selected_addons = $2, pricing_mode = 'beta' WHERE id = $3`,
+        [
+          selectedCategories || ['custom_fields', 'rate_strategies', 'fees', 'taxes', 'listings', 'guests', 'owners', 'saved_replies', 'reservations', 'automations', 'tasks'],
+          JSON.stringify(addOns || []),
+          id,
+        ]
+      );
+      const { enqueueMigration } = require('../queue');
+      await enqueueMigration(id, { priority: 1 }); // Beta users get priority
+      return res.json({ betaBypassed: true, migrationId: id });
+    }
+
     // Block enterprise_plus from checkout
     const tierInfo = getTierFromListings(manifest.listings);
     if (tierInfo.requiresQuote) {

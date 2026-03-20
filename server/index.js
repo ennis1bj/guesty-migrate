@@ -25,6 +25,7 @@ const { logger, requestIdMiddleware } = require('./logger');
 const authRoutes = require('./routes/auth');
 const migrationRoutes = require('./routes/migrations');
 const webhookRoutes = require('./routes/webhooks');
+const adminRoutes = require('./routes/admin');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -63,6 +64,7 @@ app.use('/api/migrations', migrationLimiter);
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/migrations', migrationRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Public pricing endpoint (no auth required)
 app.get('/api/pricing', migrationRoutes.getPricingHandler);
