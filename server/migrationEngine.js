@@ -263,12 +263,22 @@ const MIGRATION_ORDER = [
   'tasks',
 ];
 
+// Whitelist of allowed column names to prevent SQL injection via dynamic keys
+const ALLOWED_EXTRA_COLUMNS = new Set([
+  'results', 'diff_report', 'manifest', 'selected_categories',
+  'selected_addons', 'pricing_mode', 'error_message', 'stripe_session_id',
+]);
+
 async function updateStatus(migrationId, status, extra = {}) {
   const sets = ['status = $2'];
   const values = [migrationId, status];
   let idx = 3;
 
   for (const [key, value] of Object.entries(extra)) {
+    if (!ALLOWED_EXTRA_COLUMNS.has(key)) {
+      logger.warn('updateStatus: ignoring disallowed column', { key, migrationId });
+      continue;
+    }
     sets.push(`${key} = $${idx}`);
     values.push(typeof value === 'object' ? JSON.stringify(value) : value);
     idx++;
