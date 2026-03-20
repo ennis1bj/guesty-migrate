@@ -26,11 +26,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
-    const savedToken = localStorage.getItem('token');
-    const savedUser = localStorage.getItem('user');
-    if (savedToken && savedUser) {
-      setToken(savedToken);
-      setUser(JSON.parse(savedUser));
+    try {
+      const savedToken = localStorage.getItem('token');
+      const savedUser = localStorage.getItem('user');
+      if (savedToken && savedUser) {
+        const parsed = JSON.parse(savedUser);
+        if (parsed && typeof parsed === 'object' && parsed.id && parsed.email) {
+          setToken(savedToken);
+          setUser(parsed);
+        } else {
+          // Malformed user data — clear it
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+        }
+      }
+    } catch {
+      // Corrupted localStorage — clear and start fresh
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
     }
   }, []);
 
