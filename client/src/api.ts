@@ -5,13 +5,20 @@ const api = axios.create({
   withCredentials: true,
 });
 
+// Public paths where a 401 is normal (unauthenticated visitor) — never redirect from these
+const PUBLIC_PATHS = ['/', '/login', '/register', '/forgot-password', '/reset-password', '/terms', '/privacy', '/preview'];
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401 || error.response?.status === 403) {
-      // Only redirect if we're not already on an auth page
+      // /auth/me returning 401 just means the user isn't logged in — AuthContext handles it
+      const isAuthCheck = error.config?.url === '/auth/me';
+
       const path = window.location.pathname;
-      if (path !== '/login' && path !== '/register' && path !== '/forgot-password' && path !== '/reset-password') {
+      const isPublicPage = PUBLIC_PATHS.some((p) => path === p || path.startsWith('/preview'));
+
+      if (!isAuthCheck && !isPublicPage) {
         window.location.href = '/login';
       }
     }
