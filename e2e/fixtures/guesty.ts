@@ -5,32 +5,31 @@
  * so that the real Express backend can be exercised end-to-end without
  * making network calls to Guesty's production API.
  *
- * Endpoint families implemented:
- *   POST /oauth2/token         — returns a synthetic bearer token
- *   GET  /v1/listings          — paginated listing stubs
- *   GET  /v1/listings/:id/custom-fields  — custom field stubs
- *   GET  /v1/custom-fields     — account-level custom fields
- *   GET  /v1/revenue-management/rate-strategies — rate strategy stubs
- *   GET  /v1/finance/fees      — fee stubs
- *   GET  /v1/finance/taxes     — tax stubs
- *   GET  /v1/guests            — guest stubs
- *   GET  /v1/owners            — owner stubs
- *   GET  /v1/saved-replies     — saved-reply stubs
- *   GET  /v1/reservations      — reservation stubs
- *   GET  /v1/automations/automations — automation stubs
- *   GET  /v1/tasks-management/tasks — task stubs
- *   POST /v1/*                 — generic create handler (returns _id)
+ * All paths mirror the exact routes used by server/guestyClient.js, where
+ * BASE_URL = (GUESTY_BASE_URL)/v1.  Every method below corresponds to a real
+ * call site in guestyClient.js:
+ *
+ *   POST /oauth2/token                  — getAccessToken()
+ *   GET  /v1/listings                   — getAllListings() / getCount()
+ *   GET  /v1/listings/:id/custom-fields — per-listing custom field values
+ *   GET  /v1/custom-fields              — getAllCustomFields() / getCount()
+ *   GET  /v1/rate-strategies            — getAllRateStrategies() / getCount()
+ *   GET  /v1/fees                       — getAllFees() / getCount()
+ *   GET  /v1/taxes                      — getAllTaxes() / getCount()
+ *   GET  /v1/guests                     — getAllGuests() / getCount()
+ *   GET  /v1/owners                     — getAllOwners() / getCount()
+ *   GET  /v1/saved-replies              — getAllSavedReplies() / getCount()
+ *   GET  /v1/reservations               — getAllReservations() / getCount()
+ *   GET  /v1/automations                — getAllAutomations() / getCount()
+ *   GET  /v1/tasks-open-api/tasks       — getAllTasks() / getCount()
+ *   POST /v1/listings/:id/calendar/block — blockListingCalendar()
+ *   POST /v1/<any>                      — create handlers (return {_id})
  */
 
 import http from 'http';
 import { AddressInfo } from 'net';
 
 export const MOCK_GUESTY_PORT = 4999;
-
-type RequestHandler = (
-  req: http.IncomingMessage & { body?: unknown },
-  res: http.ServerResponse,
-) => void;
 
 function jsonReply(res: http.ServerResponse, status: number, data: unknown) {
   const body = JSON.stringify(data);
@@ -42,110 +41,102 @@ function stub(type: string, n = 2) {
   return Array.from({ length: n }, (_, i) => ({ _id: `${type}-${i + 1}`, name: `${type} ${i + 1}` }));
 }
 
-function listReply(res: http.ServerResponse, type: string, n = 2) {
+function listReply(res: http.ServerResponse, type: string, n: number) {
   jsonReply(res, 200, { results: stub(type, n), count: n });
-}
-
-function parseBody(req: http.IncomingMessage): Promise<unknown> {
-  return new Promise((resolve) => {
-    const chunks: Buffer[] = [];
-    req.on('data', (c: Buffer) => chunks.push(c));
-    req.on('end', () => {
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString() || 'null'));
-      } catch {
-        resolve(null);
-      }
-    });
-  });
 }
 
 let _idSeq = 0;
 
 function handleRequest(req: http.IncomingMessage, res: http.ServerResponse) {
   const { method, url = '/' } = req;
+  // Strip query string for matching
   const path = url.split('?')[0];
 
-  // OAuth2 token
+  // ── Auth ─────────────────────────────────────────────────────────────────
   if (method === 'POST' && path === '/oauth2/token') {
     return jsonReply(res, 200, { access_token: 'mock-guesty-token', expires_in: 3600, token_type: 'Bearer' });
   }
 
-  // Listings (may include /:id/custom-fields)
+  // ── Listings ──────────────────────────────────────────────────────────────
   if (method === 'GET' && path === '/v1/listings') {
     return jsonReply(res, 200, {
       results: [
-        { _id: 'lst-001', nickname: 'Beach House', active: true },
-        { _id: 'lst-002', nickname: 'City Flat', active: true },
+        { _id: 'lst-001', nickname: 'Beach House', active: true, pictures: [], integrations: [] },
+        { _id: 'lst-002', nickname: 'City Flat', active: true, pictures: [], integrations: [] },
       ],
       count: 2,
     });
   }
+  // Per-listing custom field values: GET /v1/listings/:id/custom-fields
   if (method === 'GET' && /^\/v1\/listings\/[^/]+\/custom-fields$/.test(path)) {
     return jsonReply(res, 200, { results: [{ _id: 'cf-lst-1', fieldId: 'cf-001', value: 'test' }], count: 1 });
   }
+  // Calendar block endpoint: POST /v1/listings/:id/calendar/block
+  if (method === 'POST' && /^\/v1\/listings\/[^/]+\/calendar\/block$/.test(path)) {
+    return jsonReply(res, 200, { success: true });
+  }
 
-  // Custom fields
+  // ── Custom fields ─────────────────────────────────────────────────────────
   if (method === 'GET' && path === '/v1/custom-fields') {
     return listReply(res, 'custom_field', 2);
   }
 
-  // Rate strategies
-  if (method === 'GET' && path === '/v1/revenue-management/rate-strategies') {
+  // ── Rate strategies (path mirrors guestyClient: /rate-strategies) ─────────
+  if (method === 'GET' && path === '/v1/rate-strategies') {
     return listReply(res, 'rate_strategy', 1);
   }
 
-  // Fees
-  if (method === 'GET' && path === '/v1/finance/fees') {
+  // ── Fees ──────────────────────────────────────────────────────────────────
+  if (method === 'GET' && path === '/v1/fees') {
     return listReply(res, 'fee', 2);
   }
 
-  // Taxes
-  if (method === 'GET' && path === '/v1/finance/taxes') {
+  // ── Taxes ─────────────────────────────────────────────────────────────────
+  if (method === 'GET' && path === '/v1/taxes') {
     return listReply(res, 'tax', 1);
   }
 
-  // Guests
+  // ── Guests ────────────────────────────────────────────────────────────────
   if (method === 'GET' && path === '/v1/guests') {
     return listReply(res, 'guest', 3);
   }
 
-  // Owners
+  // ── Owners ────────────────────────────────────────────────────────────────
   if (method === 'GET' && path === '/v1/owners') {
     return listReply(res, 'owner', 1);
   }
 
-  // Saved replies
+  // ── Saved replies ─────────────────────────────────────────────────────────
   if (method === 'GET' && path === '/v1/saved-replies') {
     return listReply(res, 'saved_reply', 2);
   }
 
-  // Reservations
+  // ── Reservations ──────────────────────────────────────────────────────────
   if (method === 'GET' && path === '/v1/reservations') {
     return listReply(res, 'reservation', 4);
   }
 
-  // Automations
-  if (method === 'GET' && path === '/v1/automations/automations') {
+  // ── Automations (path mirrors guestyClient: /automations) ─────────────────
+  if (method === 'GET' && path === '/v1/automations') {
     return listReply(res, 'automation', 1);
   }
 
-  // Tasks
-  if (method === 'GET' && path === '/v1/tasks-management/tasks') {
+  // ── Tasks (path mirrors guestyClient: /tasks-open-api/tasks) ─────────────
+  if (method === 'GET' && path === '/v1/tasks-open-api/tasks') {
     return listReply(res, 'task', 2);
   }
 
-  // Generic POST → create (returns a synthetic _id)
+  // ── Generic POST → create (returns a synthetic _id) ─────────────────────
   if (method === 'POST') {
     return jsonReply(res, 201, { _id: `created-${++_idSeq}` });
   }
 
-  // Generic PUT/PATCH → update
+  // ── Generic PUT/PATCH → update ────────────────────────────────────────────
   if (method === 'PUT' || method === 'PATCH') {
     return jsonReply(res, 200, { _id: path.split('/').pop(), updated: true });
   }
 
-  // 404 fallback
+  // ── 404 fallback ──────────────────────────────────────────────────────────
   jsonReply(res, 404, { error: `Guesty mock: no handler for ${method} ${path}` });
 }
 

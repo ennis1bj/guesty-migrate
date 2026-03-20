@@ -1,5 +1,26 @@
 import { defineConfig, devices } from '@playwright/test';
 
+/**
+ * Playwright configuration for GuestyMigrate E2E browser tests.
+ *
+ * ## Running the browser E2E suite locally
+ *
+ * 1. Start the Guesty mock server + dev stack with the mock URL injected:
+ *
+ *    GUESTY_BASE_URL=http://127.0.0.1:4999 \
+ *    GUESTY_AUTH_URL=http://127.0.0.1:4999 \
+ *    NODE_ENV=test npm run dev
+ *
+ * 2. Run Playwright (in a second terminal):
+ *
+ *    npm run test:e2e
+ *
+ * The `globalSetup` hook automatically starts the Guesty mock HTTP server on
+ * port 4999 before any test runs, and `globalTeardown` stops it afterwards.
+ * The test suite requires the dev server to already be running — it does NOT
+ * start one itself (`reuseExistingServer: true`).
+ */
+
 export default defineConfig({
   testDir: './e2e',
   timeout: 90_000,
@@ -25,23 +46,13 @@ export default defineConfig({
   ],
 
   /**
-   * CI: starts the full dev stack with the Guesty mock URL injected via env vars.
-   * globalSetup writes GUESTY_BASE_URL / GUESTY_AUTH_URL to process.env before
-   * this command is executed, so the Express server picks them up automatically.
-   *
-   * Local Replit dev: reuseExistingServer=true reuses the running dev server.
-   * For real backend E2E coverage locally, start the dev server with:
-   *   GUESTY_BASE_URL=http://127.0.0.1:4999 GUESTY_AUTH_URL=http://127.0.0.1:4999 NODE_ENV=test npm run dev
+   * Require a pre-running dev server on port 5000.
+   * reuseExistingServer: true — never auto-start; fail fast if the server is
+   * not up.  Start it with the GUESTY env vars as described above.
    */
   webServer: {
-    command: [
-      'GUESTY_BASE_URL=http://127.0.0.1:4999',
-      'GUESTY_AUTH_URL=http://127.0.0.1:4999',
-      'NODE_ENV=test',
-      'npm run dev',
-    ].join(' '),
+    command: 'echo "Dev server must be started manually with GUESTY_BASE_URL env vars — see playwright.config.ts"',
     url: 'http://localhost:5000',
-    reuseExistingServer: !process.env.CI,
-    timeout: 60_000,
+    reuseExistingServer: true,
   },
 });
