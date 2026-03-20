@@ -14,7 +14,7 @@ vi.mock('../api', () => ({
 }));
 
 import api from '../api';
-const mockApi = api as { post: ReturnType<typeof vi.fn> };
+const mockApi = api as unknown as { post: ReturnType<typeof vi.fn> };
 
 function TestConsumer({ onError }: { onError?: (e: Error) => void } = {}) {
   const { user, isAuthenticated, login, logout, register } = useAuth();
