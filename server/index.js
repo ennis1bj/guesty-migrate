@@ -33,9 +33,22 @@ const PORT = process.env.PORT || 3001;
 // Request ID + structured logging middleware
 app.use(requestIdMiddleware);
 
-// CORS for development
+// Security headers
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
+
+// CORS — restrict to FRONTEND_URL in production, allow all in development
+const isProd = process.env.NODE_ENV === 'production';
 app.use(cors({
-  origin: true,
+  origin: isProd ? (process.env.FRONTEND_URL || false) : true,
   credentials: true,
 }));
 
@@ -61,6 +74,22 @@ const migrationLimiter = rateLimit({
 });
 app.use('/api/migrations', migrationLimiter);
 
+// Rate limiting for admin routes
+const adminLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  message: { error: 'Too many requests, please try again later' },
+});
+app.use('/api/admin', adminLimiter);
+
+// Rate limiting for webhook routes
+const webhookLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  message: { error: 'Too many requests' },
+});
+app.use('/api/webhooks', webhookLimiter);
+
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/migrations', migrationRoutes);
@@ -69,9 +98,15 @@ app.use('/api/admin', adminRoutes);
 // Public pricing endpoint (no auth required)
 app.get('/api/pricing', migrationRoutes.getPricingHandler);
 
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+// Health check — verifies database connectivity
+app.get('/api/health', async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  } catch (err) {
+    logger.error('Health check failed', { error: err.message });
+    res.status(503).json({ status: 'degraded', timestamp: new Date().toISOString(), error: 'Database unreachable' });
+  }
 });
 
 // API documentation (Swagger UI)
