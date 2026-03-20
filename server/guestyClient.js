@@ -15,37 +15,56 @@ class GuestyClient {
 
   async getAccessToken() {
     // Check cache first
-    const cached = await pool.query(
-      'SELECT access_token, expires_at FROM token_cache WHERE client_id = $1',
-      [this.clientId]
-    );
+    try {
+      const cached = await pool.query(
+        'SELECT access_token, expires_at FROM token_cache WHERE client_id = $1',
+        [this.clientId]
+      );
 
-    if (cached.rows.length > 0) {
-      const { access_token, expires_at } = cached.rows[0];
-      if (new Date(expires_at) > new Date(Date.now() + 60000)) {
-        try { return decrypt(access_token); } catch { return access_token; }
+      if (cached.rows.length > 0) {
+        const { access_token, expires_at } = cached.rows[0];
+        if (new Date(expires_at) > new Date(Date.now() + 60000)) {
+          try { return decrypt(access_token); } catch { return access_token; }
+        }
       }
+    } catch (cacheErr) {
+      // Cache lookup failed — continue to fetch a fresh token
     }
 
     // Fetch new token
-    const response = await axios.post(AUTH_URL, new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: this.clientId,
-      client_secret: this.clientSecret,
-    }), {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    });
+    let response;
+    try {
+      response = await axios.post(AUTH_URL, new URLSearchParams({
+        grant_type: 'client_credentials',
+        client_id: this.clientId,
+        client_secret: this.clientSecret,
+      }), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        timeout: 15000,
+      });
+    } catch (authErr) {
+      const status = authErr.response?.status;
+      const msg = authErr.response?.data?.error || authErr.message;
+      throw new Error(`Guesty OAuth token request failed (${status || 'network error'}): ${msg}`);
+    }
 
     const { access_token, expires_in } = response.data;
+    if (!access_token) {
+      throw new Error('Guesty OAuth response did not include an access_token');
+    }
     const expiresAt = new Date(Date.now() + (expires_in || 3600) * 1000);
 
     // Upsert cache — encrypt token at rest
-    await pool.query(
-      `INSERT INTO token_cache (client_id, access_token, expires_at)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (client_id) DO UPDATE SET access_token = $2, expires_at = $3`,
-      [this.clientId, encrypt(access_token), expiresAt]
-    );
+    try {
+      await pool.query(
+        `INSERT INTO token_cache (client_id, access_token, expires_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (client_id) DO UPDATE SET access_token = $2, expires_at = $3`,
+        [this.clientId, encrypt(access_token), expiresAt]
+      );
+    } catch (cacheWriteErr) {
+      // Non-fatal: token is still valid even if cache write fails
+    }
 
     return access_token;
   }
@@ -213,13 +232,34 @@ class GuestyClient {
   async uploadListingPhoto(listingId, photoUrl) {
     const token = await this.getAccessToken();
 
+    // Validate the photo URL is an HTTP(S) URL to mitigate SSRF
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(photoUrl);
+    } catch {
+      throw new Error(`Invalid photo URL: ${photoUrl}`);
+    }
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+      throw new Error(`Photo URL must be HTTP/HTTPS, got: ${parsedUrl.protocol}`);
+    }
+
     // Download image with 15s timeout
-    const imageResponse = await axios.get(photoUrl, {
-      responseType: 'arraybuffer',
-      timeout: 15000,
-    });
+    let imageResponse;
+    try {
+      imageResponse = await axios.get(photoUrl, {
+        responseType: 'arraybuffer',
+        timeout: 15000,
+        maxRedirects: 3,
+      });
+    } catch (downloadErr) {
+      throw new Error(`Failed to download photo from ${photoUrl}: ${downloadErr.message}`);
+    }
 
     const contentType = imageResponse.headers['content-type'] || 'image/jpeg';
+    // Validate content type is actually an image
+    if (!contentType.startsWith('image/')) {
+      throw new Error(`Photo URL returned non-image content type: ${contentType}`);
+    }
     const ext = contentType.split('/')[1]?.split(';')[0] || 'jpg';
     const filename = `photo_${Date.now()}.${ext}`;
 
@@ -229,19 +269,23 @@ class GuestyClient {
       contentType,
     });
 
-    const response = await axios.post(
-      `${BASE_URL}/listings/${listingId}/pictures/upload`,
-      form,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          ...form.getHeaders(),
-        },
-        timeout: 30000,
-      }
-    );
-
-    return response.data;
+    try {
+      const response = await axios.post(
+        `${BASE_URL}/listings/${listingId}/pictures/upload`,
+        form,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...form.getHeaders(),
+          },
+          timeout: 30000,
+        }
+      );
+      return response.data;
+    } catch (uploadErr) {
+      const status = uploadErr.response?.status;
+      throw new Error(`Photo upload to listing ${listingId} failed (${status || 'network error'}): ${uploadErr.message}`);
+    }
   }
 
   async getListingCalendarBlocks(listingId) {
