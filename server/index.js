@@ -42,6 +42,18 @@ app.use((req, res, next) => {
   if (process.env.NODE_ENV === 'production') {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
+  // Content-Security-Policy: allow self + Google Fonts + Stripe JS/iframes
+  res.setHeader('Content-Security-Policy', [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' js.stripe.com",
+    "style-src 'self' 'unsafe-inline' fonts.googleapis.com",
+    "font-src 'self' fonts.gstatic.com",
+    "img-src 'self' data: https:",
+    "connect-src 'self' api.stripe.com open-api.guesty.com",
+    "frame-src js.stripe.com",
+    "object-src 'none'",
+    "base-uri 'self'",
+  ].join('; '));
   next();
 });
 

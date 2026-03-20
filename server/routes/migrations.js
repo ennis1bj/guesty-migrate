@@ -7,6 +7,18 @@ const { getTierFromListings, calculatePerListingCents, getAddonPriceMap } = requ
 
 const router = express.Router();
 
+// Stripe is initialized once at module load so configuration errors surface at
+// startup rather than at request time. Returns null when the key is absent so
+// that individual handlers can return a clear 503 instead of crashing.
+let _stripe = null;
+function getStripe() {
+  if (!_stripe) {
+    if (!process.env.STRIPE_SECRET_KEY) return null;
+    _stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+  }
+  return _stripe;
+}
+
 // All routes require authentication
 router.use(authenticateToken);
 
@@ -204,10 +216,10 @@ router.post('/:id/checkout', async (req, res) => {
     }
 
     // Create Stripe Checkout session
-    if (!process.env.STRIPE_SECRET_KEY) {
+    const stripe = getStripe();
+    if (!stripe) {
       return res.status(503).json({ error: 'Payment processing is not configured' });
     }
-    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items,

@@ -3,6 +3,16 @@ const { pool } = require('../db');
 const { authenticateToken, requireAdmin } = require('../auth');
 const { logger } = require('../logger');
 
+// Stripe singleton — initialized once so config errors surface at startup.
+let _stripe = null;
+function getStripe() {
+  if (!_stripe) {
+    if (!process.env.STRIPE_SECRET_KEY) return null;
+    _stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+  }
+  return _stripe;
+}
+
 const router = express.Router();
 
 // All admin routes require authentication + admin role
@@ -154,7 +164,10 @@ router.post('/beta/:userId/invoice', async (req, res) => {
     const user = userResult.rows[0];
 
     // ── Stripe invoice creation ─────────────────────────────────────────
-    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+    const stripe = getStripe();
+    if (!stripe) {
+      return res.status(503).json({ error: 'Payment processing is not configured' });
+    }
 
     // Find or create Stripe customer
     const customers = await stripe.customers.list({ email: user.email, limit: 1 });

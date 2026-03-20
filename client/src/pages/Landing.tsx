@@ -70,12 +70,37 @@ const steps = [
 ];
 
 const pricingTiers = [
-  { name: 'Starter',       listings: '1 – 10',    price: '$149',   popular: false },
-  { name: 'Growth',        listings: '11 – 50',   price: '$349',   popular: false },
-  { name: 'Professional',  listings: '51 – 150',  price: '$699',   popular: true },
-  { name: 'Business',      listings: '151 – 300', price: '$999',   popular: false },
-  { name: 'Enterprise',    listings: '301 – 500', price: '$1,499', popular: false },
-  { name: 'Enterprise+',   listings: '500+',      price: 'Custom', popular: false, isCustom: true },
+  {
+    name: 'Starter', listings: '1 – 10', price: '$149', popular: false,
+    features: ['All 11 data categories', 'ID remapping', 'Verification report', 'Email support'],
+  },
+  {
+    name: 'Growth', listings: '11 – 50', price: '$349', popular: false,
+    features: ['All 11 data categories', 'ID remapping', 'Verification report', 'Email support'],
+  },
+  {
+    name: 'Professional', listings: '51 – 150', price: '$699', popular: true,
+    features: ['All 11 data categories', 'ID remapping', 'Verification report', 'Priority email support'],
+  },
+  {
+    name: 'Business', listings: '151 – 300', price: '$999', popular: false,
+    features: ['All 11 data categories', 'ID remapping', 'Verification report', 'Priority email support'],
+  },
+  {
+    name: 'Enterprise', listings: '301 – 500', price: '$1,499', popular: false,
+    features: ['All 11 data categories', 'ID remapping', 'Verification report', 'Priority email + phone support'],
+  },
+  {
+    name: 'Enterprise+', listings: '500+', price: 'Custom', popular: false, isCustom: true,
+    features: ['All 11 data categories', 'ID remapping', 'Verification report', 'Dedicated migration specialist'],
+  },
+];
+
+const addons = [
+  { name: 'Priority Processing', price: '$99',  description: 'Skip the queue — your migration runs first.' },
+  { name: 'Dedicated Support & Review', price: '$149', description: 'A migration specialist reviews your setup and assists during the process.' },
+  { name: 'Re-Migration Pass', price: '$79', description: 'One free re-run within 30 days if you need to migrate again.' },
+  { name: 'Post-Migration Verify Call', price: '$99', description: '30-minute video call to walk through your destination account.' },
 ];
 
 const faqs = [
@@ -263,7 +288,8 @@ export default function Landing() {
               Pay per migration based on your listing count. No subscriptions, no hidden fees.
             </p>
             <p className="text-sm text-slate-400 max-w-2xl mx-auto">
-              Prefer pay-per-listing? Choose the per-listing mode at checkout for graduated rates starting at $8/listing.
+              Prefer pay-per-listing? Choose the per-listing mode at checkout — graduated rates
+              start at <strong>$8/listing</strong> (1–50), then <strong>$5</strong> (51–200), and <strong>$3</strong> (201+), with a flat $79 base fee.
             </p>
           </div>
 
@@ -271,31 +297,41 @@ export default function Landing() {
             {pricingTiers.map((tier) => (
               <div
                 key={tier.name}
-                className={`bg-white rounded-2xl p-8 text-center transition-all duration-200 ${
+                className={`bg-white rounded-2xl p-8 flex flex-col transition-all duration-200 ${
                   tier.popular
                     ? 'ring-2 ring-amber-500 shadow-lg scale-[1.03]'
                     : 'border border-stone-200 shadow-sm hover:shadow-md hover:border-stone-300'
                 }`}
               >
                 {tier.popular && (
-                  <span className="inline-block bg-amber-500 text-slate-900 text-xs font-bold px-3 py-1 rounded-full mb-4 uppercase tracking-wide">
+                  <span className="inline-block bg-amber-500 text-slate-900 text-xs font-bold px-3 py-1 rounded-full mb-4 uppercase tracking-wide text-center">
                     Most Popular
                   </span>
                 )}
-                <h3 className="text-xl font-bold text-slate-900 mb-2">{tier.name}</h3>
-                <p className="text-slate-400 mb-4">{tier.listings} listings</p>
-                <p className="text-4xl font-extrabold text-slate-900 mb-6">{tier.price}</p>
+                <h3 className="text-xl font-bold text-slate-900 mb-1">{tier.name}</h3>
+                <p className="text-slate-400 mb-4 text-sm">{tier.listings} listings</p>
+                <p className="text-4xl font-extrabold text-slate-900 mb-5">{tier.price}</p>
+                <ul className="space-y-2 mb-6 flex-1">
+                  {tier.features.map((f) => (
+                    <li key={f} className="flex items-center gap-2 text-sm text-slate-600">
+                      <svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                      {f}
+                    </li>
+                  ))}
+                </ul>
                 {tier.isCustom ? (
                   <a
-                    href="mailto:support@guestymigrate.com?subject=Enterprise%20Migration%20Quote"
-                    className="block w-full py-3 rounded-xl font-semibold transition-all duration-200 bg-stone-100 text-slate-900 hover:bg-stone-200"
+                    href="mailto:enterprise@guestymigrate.com?subject=Enterprise%2B%20Migration%20Quote&body=Hi%2C%20I%20have%20over%20500%20listings%20and%20would%20like%20a%20custom%20migration%20quote."
+                    className="block w-full py-3 rounded-xl font-semibold transition-all duration-200 bg-stone-100 text-slate-900 hover:bg-stone-200 text-center"
                   >
-                    Contact Us
+                    Request a Quote
                   </a>
                 ) : (
                   <Link
                     to="/register"
-                    className={`block w-full py-3 rounded-xl font-semibold transition-all duration-200 ${
+                    className={`block w-full py-3 rounded-xl font-semibold transition-all duration-200 text-center ${
                       tier.popular
                         ? 'bg-amber-500 text-slate-900 hover:bg-amber-600 shadow-sm hover:shadow-md'
                         : 'bg-stone-100 text-slate-900 hover:bg-stone-200'
@@ -306,6 +342,29 @@ export default function Landing() {
                 )}
               </div>
             ))}
+          </div>
+
+          {/* Money-back guarantee */}
+          <p className="text-center text-sm text-slate-500 mt-8 flex items-center justify-center gap-2">
+            <svg className="w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+            </svg>
+            <span><strong>30-day satisfaction guarantee.</strong> If your migration doesn't complete successfully, we'll make it right or refund you in full.</span>
+          </p>
+
+          {/* Add-ons */}
+          <div className="mt-16">
+            <h3 className="text-2xl font-bold text-slate-900 text-center mb-2">Optional Add-ons</h3>
+            <p className="text-slate-500 text-center mb-8 text-sm">Enhance your migration with these optional extras, available at checkout.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 max-w-5xl mx-auto">
+              {addons.map((addon) => (
+                <div key={addon.name} className="bg-white border border-stone-200 rounded-2xl p-6 text-center hover:shadow-md transition-all duration-200">
+                  <p className="text-2xl font-extrabold text-slate-900 mb-1">{addon.price}</p>
+                  <p className="text-sm font-semibold text-slate-700 mb-2">{addon.name}</p>
+                  <p className="text-xs text-slate-400 leading-relaxed">{addon.description}</p>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>
