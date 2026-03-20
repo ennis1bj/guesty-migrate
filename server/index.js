@@ -31,6 +31,9 @@ const publicRoutes = require('./routes/public');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Trust the first proxy (required on Replit/Heroku/etc. for rate-limit IP detection)
+app.set('trust proxy', 1);
+
 // Request ID + structured logging middleware
 app.use(requestIdMiddleware);
 
