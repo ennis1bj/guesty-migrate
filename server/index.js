@@ -158,8 +158,8 @@ async function start() {
     // Recover any stuck migrations from before restart
     await recoverStuckMigrations();
 
-    // Initialize job queue
-    initQueue();
+    // Initialize job queue (async — pre-tests Redis before handing to BullMQ)
+    await initQueue();
 
     app.listen(PORT, () => {
       logger.info(`GuestyMigrate server running on port ${PORT}`);

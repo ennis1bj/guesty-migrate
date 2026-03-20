@@ -1,4 +1,4 @@
-let Queue, Worker;
+let Queue, Worker, Redis;
 
 try {
   const bullmq = require('bullmq');
@@ -8,21 +8,48 @@ try {
   // BullMQ not available
 }
 
+try {
+  Redis = require('ioredis');
+} catch {
+  // ioredis not available
+}
+
 const { runMigration } = require('./migrationEngine');
 
 let migrationQueue = null;
 let migrationWorker = null;
 let useRedis = false;
 
-function initQueue() {
+async function initQueue() {
   if (!process.env.REDIS_URL) {
     console.log('REDIS_URL not set — using in-process job execution');
     return;
   }
 
-  if (!Queue || !Worker) {
-    console.log('BullMQ not available — using in-process job execution');
+  if (!Queue || !Worker || !Redis) {
+    console.log('BullMQ/ioredis not available — using in-process job execution');
     return;
+  }
+
+  // Pre-test the connection before handing credentials to BullMQ.
+  // This prevents BullMQ's internal RedisConnection from emitting an
+  // unhandled 'error' event that would crash the process.
+  const testClient = new Redis(process.env.REDIS_URL, {
+    lazyConnect: true,
+    maxRetriesPerRequest: 1,
+    connectTimeout: 5000,
+    enableReadyCheck: false,
+  });
+
+  try {
+    await testClient.connect();
+    await testClient.ping();
+  } catch (err) {
+    console.warn(`Redis connection test failed (${err.message}) — using in-process job execution`);
+    try { testClient.disconnect(); } catch {}
+    return;
+  } finally {
+    try { testClient.disconnect(); } catch {}
   }
 
   try {
