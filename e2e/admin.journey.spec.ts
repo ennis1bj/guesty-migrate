@@ -214,9 +214,20 @@ test(
       await successBanner.isVisible().catch(() => false),
       'success banner shown after granting beta access',
     ).toBe(true);
+
+    // After grant, fetchParticipants() re-runs → participant list re-renders.
+    // The fixture always returns the same mock participant (beta@example.com),
+    // so we verify the list still shows a participant after the grant action.
+    const participantList = page.locator('h2:has-text("Beta Participants")');
+    await participantList.waitFor({ timeout: 8_000 }).catch(() => {});
+    const listVisible = await participantList.isVisible().catch(() => false);
+    if (!listVisible) {
+      await issueFor(info, 'grant → participant list', '"Beta Participants" section visible after grant', '"Beta Participants" heading not found');
+    }
+    expect.soft(listVisible, '"Beta Participants" section visible after grant').toBe(true);
   });
 
-  // ── Step 7: Participants list — email, status badge, dates ────────────────
+  // ── Step 7: Participants list — email, status badge, start/expiry dates ───
   await test.step('participants list', async () => {
     const participant = ADMIN_RESPONSES.betaParticipants.participants[0];
 
@@ -233,6 +244,35 @@ test(
     expect.soft(
       await statusBadge.isVisible().catch(() => false),
       'status badge (active) visible for participant',
+    ).toBe(true);
+
+    // Start / Expires date labels are always rendered (value may be "—" if null)
+    const startLabel  = page.locator('span.text-slate-400:has-text("Start")').first();
+    const expiresLabel = page.locator('span.text-slate-400:has-text("Expires")').first();
+    expect.soft(
+      await startLabel.isVisible().catch(() => false),
+      '"Start" date label visible in participant row',
+    ).toBe(true);
+    expect.soft(
+      await expiresLabel.isVisible().catch(() => false),
+      '"Expires" date label visible in participant row',
+    ).toBe(true);
+
+    // The mock has non-null dates — formatted date text should appear
+    const startDate   = new Date(participant.beta_starts_at!).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+    const expiresDate = new Date(participant.beta_expires_at!).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+    const startDateEl   = page.locator(`text=${startDate}`).first();
+    const expiresDateEl = page.locator(`text=${expiresDate}`).first();
+    if (!(await startDateEl.isVisible().catch(() => false))) {
+      await issueFor(info, 'participant start date', `start date "${startDate}" visible`, 'start date text not found in participant row');
+    }
+    expect.soft(
+      await startDateEl.isVisible().catch(() => false),
+      `formatted start date "${startDate}" visible in participant row`,
+    ).toBe(true);
+    expect.soft(
+      await expiresDateEl.isVisible().catch(() => false),
+      `formatted expiry date "${expiresDate}" visible in participant row`,
     ).toBe(true);
 
     const extendBtn = page.locator('button:has-text("Extend")').first();
