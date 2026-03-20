@@ -109,7 +109,7 @@ export default function Privacy() {
         <section>
           <h2 className="text-xl font-semibold text-gray-900 mb-3">8. Cookies and Local Storage</h2>
           <p className="text-gray-700">
-            We use browser localStorage to store authentication tokens (JWT) for session persistence.
+            We use httpOnly cookies to store authentication tokens (JWT) for session persistence.
             We do not use third-party tracking cookies or analytics.
           </p>
         </section>
