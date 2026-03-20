@@ -118,9 +118,7 @@ const migrate = async () => {
     await client.query(`
       ALTER TABLE users ADD COLUMN IF NOT EXISTS beta_notes TEXT;
     `);
-    await client.query(`
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT false;
-    `);
+    // NOTE: is_admin column already added above with email verification columns
 
     // ── Beta invoices table ─────────────────────────────────────────────────
     await client.query(`

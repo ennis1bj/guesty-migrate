@@ -93,6 +93,16 @@ The frontend runs on `http://localhost:5173` and the backend on `http://localhos
 
 API documentation is available at `http://localhost:3001/api/docs` in development mode.
 
+## Creating an Admin Account
+
+To create the first admin user for managing beta access and invoices:
+
+```bash
+node server/scripts/create-admin.js admin@example.com yourpassword
+```
+
+This creates a verified admin account that can access `/admin` in the dashboard.
+
 ## Running Tests
 
 ```bash
