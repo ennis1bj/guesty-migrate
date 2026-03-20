@@ -204,6 +204,9 @@ router.post('/:id/checkout', async (req, res) => {
     }
 
     // Create Stripe Checkout session
+    if (!process.env.STRIPE_SECRET_KEY) {
+      return res.status(503).json({ error: 'Payment processing is not configured' });
+    }
     const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
