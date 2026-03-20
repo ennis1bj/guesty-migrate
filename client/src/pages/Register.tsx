@@ -21,8 +21,8 @@ export default function Register() {
       return;
     }
 
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters');
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters');
       return;
     }
 
@@ -93,7 +93,7 @@ export default function Register() {
               onChange={(e) => setConfirmPassword(e.target.value)}
               className="w-full px-4 py-3 border border-stone-300 rounded-xl bg-white text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 outline-none transition-colors"
               required
-              minLength={6}
+              minLength={8}
             />
           </div>
 
