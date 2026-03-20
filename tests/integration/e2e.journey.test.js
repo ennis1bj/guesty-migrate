@@ -50,31 +50,38 @@ async function logGitHubIssue(title, body) {
   }
 }
 
-/**
- * Checks an HTTP response against the expected status and logs a GitHub issue
- * when there is a mismatch.  Always returns the response so tests can chain
- * further assertions.
- */
+function issueBody(action, expected, actual, context = {}) {
+  const lines = [
+    `**Action**: ${action}`,
+    `**Expected**: ${expected}`,
+    `**Actual**: ${actual}`,
+  ];
+  if (context.status) lines.push(`**HTTP status**: ${context.status}`);
+  if (context.body)   lines.push(`**Response body**:\n\`\`\`json\n${JSON.stringify(context.body, null, 2)}\n\`\`\``);
+  return lines.join('\n');
+}
+
 async function checkResponse(description, res, expectedStatus) {
   if (res.status !== expectedStatus) {
-    const body = typeof res.body === 'object' ? JSON.stringify(res.body, null, 2) : String(res.body);
     await logGitHubIssue(
-      `Unexpected HTTP response: ${description}`,
-      [
-        `## Unexpected API Response`,
-        ``,
-        `**Description**: ${description}`,
-        `**Expected status**: ${expectedStatus}`,
-        `**Actual status**: ${res.status}`,
-        ``,
-        `**Response body**:`,
-        `\`\`\`json`,
-        body,
-        `\`\`\``,
-      ].join('\n'),
+      `Unexpected HTTP status: ${description}`,
+      issueBody(description, `HTTP ${expectedStatus}`, `HTTP ${res.status}`, { status: res.status, body: res.body }),
     ).catch(() => {});
   }
   return res;
+}
+
+async function checkShape(description, actual, expected) {
+  const mismatches = [];
+  for (const [key, val] of Object.entries(expected)) {
+    if (actual[key] !== val) mismatches.push(`${key}: expected ${JSON.stringify(val)}, got ${JSON.stringify(actual[key])}`);
+  }
+  if (mismatches.length > 0) {
+    await logGitHubIssue(
+      `Unexpected response shape: ${description}`,
+      issueBody(description, JSON.stringify(expected), JSON.stringify(actual), { body: actual }),
+    ).catch(() => {});
+  }
 }
 
 // ── In-memory database state (module-level — persists across tests) ───────────
@@ -358,6 +365,8 @@ describe('E2E: Full user migration journey', () => {
     );
 
     expect(res.status).toBe(201);
+    if (typeof res.body.token !== 'string') await checkShape('POST /api/auth/register body.token', res.body, { token: res.body.token });
+    if (res.body.user?.email !== 'e2e-journey@example.com') await checkShape('POST /api/auth/register body.user.email', res.body.user ?? {}, { email: 'e2e-journey@example.com' });
     expect(res.body.token).toBeDefined();
     expect(typeof res.body.token).toBe('string');
     expect(res.body.user.email).toBe('e2e-journey@example.com');
@@ -384,9 +393,11 @@ describe('E2E: Full user migration journey', () => {
     );
 
     expect(res.status).toBe(200);
+    if (!res.body.migrationId) await checkShape('POST /api/migrations/preflight body.migrationId', res.body, { migrationId: '(defined)' });
     expect(res.body.migrationId).toBeDefined();
 
     // Manifest should reflect the mocked GuestyClient data
+    await checkShape('POST /api/migrations/preflight body.manifest', res.body.manifest ?? {}, { listings: 2, custom_fields: 1, fees: 1, taxes: 1, guests: 1 });
     expect(res.body.manifest).toMatchObject({
       listings:      2,
       custom_fields: 1,
@@ -396,6 +407,7 @@ describe('E2E: Full user migration journey', () => {
     });
 
     // Pricing tier should be present and not require a custom quote (2 listings → starter)
+    if (!res.body.pricing?.tier) await checkShape('POST /api/migrations/preflight body.pricing', res.body.pricing ?? {}, { tier: '(defined)' });
     expect(res.body.pricing).toBeDefined();
     expect(res.body.pricing.tier).toBeDefined();
     expect(res.body.pricing.requiresQuote).not.toBe(true);
@@ -432,16 +444,24 @@ describe('E2E: Full user migration journey', () => {
     );
 
     expect(res.status).toBe(200);
+    if (res.body.id !== migrationId) await checkShape('GET /api/migrations/:id/status body.id', res.body, { id: migrationId });
     expect(res.body.id).toBe(migrationId);
 
     const TERMINAL = ['complete', 'complete_with_errors', 'failed'];
+    if (!TERMINAL.includes(res.body.status)) {
+      await checkShape('GET /api/migrations/:id/status body.status terminal', { status: res.body.status }, { status: 'complete|complete_with_errors|failed' });
+    }
     expect(TERMINAL).toContain(res.body.status);
 
     // At least one category log must have been written by runMigration
+    if (!Array.isArray(res.body.logs) || res.body.logs.length === 0) {
+      await checkShape('GET /api/migrations/:id/status body.logs', res.body, { logs: '(non-empty array)' });
+    }
     expect(Array.isArray(res.body.logs)).toBe(true);
     expect(res.body.logs.length).toBeGreaterThan(0);
 
     const log = res.body.logs[0];
+    await checkShape('GET /api/migrations/:id/status logs[0]', log, { category: log.category ?? '(missing)', status: log.status ?? '(missing)' });
     expect(log.category).toBeDefined();
     expect(log.status).toBeDefined();
     expect(typeof log.source_count).toBe('number');
@@ -449,6 +469,7 @@ describe('E2E: Full user migration journey', () => {
 
     // Diff report is populated for non-fatal completions
     if (res.body.status !== 'failed') {
+      if (!res.body.diff_report) await checkShape('GET /api/migrations/:id/status body.diff_report', res.body, { diff_report: '(defined)' });
       expect(res.body.diff_report).toBeDefined();
     }
   });
