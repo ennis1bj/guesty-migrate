@@ -28,15 +28,20 @@ function initQueue() {
   try {
     const connection = { url: process.env.REDIS_URL };
 
+    async function closeRedis(reason) {
+      if (!useRedis) return;
+      console.warn(`BullMQ ${reason} — falling back to in-process`);
+      useRedis = false;
+      const q = migrationQueue;
+      const w = migrationWorker;
+      migrationQueue = null;
+      migrationWorker = null;
+      try { await w?.close(); } catch {}
+      try { await q?.close(); } catch {}
+    }
+
     migrationQueue = new Queue('migrations', { connection });
-    migrationQueue.on('error', (err) => {
-      if (useRedis) {
-        console.warn('BullMQ Queue connection error — falling back to in-process:', err.message);
-        useRedis = false;
-        migrationQueue = null;
-        migrationWorker = null;
-      }
-    });
+    migrationQueue.on('error', (err) => closeRedis(`Queue error: ${err.message}`));
 
     migrationWorker = new Worker(
       'migrations',
@@ -55,10 +60,7 @@ function initQueue() {
       console.error(`Migration job ${job?.id} failed:`, err.message);
     });
 
-    migrationWorker.on('error', (err) => {
-      console.warn('BullMQ Worker connection error — falling back to in-process:', err.message);
-      useRedis = false;
-    });
+    migrationWorker.on('error', (err) => closeRedis(`Worker error: ${err.message}`));
 
     useRedis = true;
     console.log('BullMQ queue initialized with Redis');
