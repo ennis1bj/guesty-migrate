@@ -101,6 +101,9 @@ const migrate = async () => {
     await client.query(`
       ALTER TABLE users ADD COLUMN IF NOT EXISTS is_demo BOOLEAN DEFAULT false;
     `);
+    await client.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT false;
+    `);
 
     console.log('Database migrations completed successfully');
   } finally {
