@@ -59,7 +59,7 @@ export default function Navbar() {
               </>
             ) : (
               <>
-                <a href="#pricing" className="text-slate-300 hover:text-white text-sm font-medium transition-colors">
+                <a href="/#pricing" className="text-slate-300 hover:text-white text-sm font-medium transition-colors">
                   Pricing
                 </a>
                 <Link to="/login" className="text-slate-300 hover:text-white text-sm font-medium transition-colors">
