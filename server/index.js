@@ -18,7 +18,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
-const { pool, migrate } = require('./db');
+const { pool, migrate, purgeExpiredCredentials } = require('./db');
 const { initQueue, recoverStuckMigrations } = require('./queue');
 const { logger, requestIdMiddleware } = require('./logger');
 
@@ -26,6 +26,7 @@ const authRoutes = require('./routes/auth');
 const migrationRoutes = require('./routes/migrations');
 const webhookRoutes = require('./routes/webhooks');
 const adminRoutes = require('./routes/admin');
+const publicRoutes = require('./routes/public');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -39,28 +40,25 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://open-api.guesty.com https://js.stripe.com https://api.stripe.com; frame-src https://js.stripe.com; object-src 'none'; base-uri 'self'"
+  );
   if (process.env.NODE_ENV === 'production') {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
-  // Content-Security-Policy: allow self + Google Fonts + Stripe JS/iframes
-  res.setHeader('Content-Security-Policy', [
-    "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' js.stripe.com",
-    "style-src 'self' 'unsafe-inline' fonts.googleapis.com",
-    "font-src 'self' fonts.gstatic.com",
-    "img-src 'self' data: https:",
-    "connect-src 'self' api.stripe.com open-api.guesty.com",
-    "frame-src js.stripe.com",
-    "object-src 'none'",
-    "base-uri 'self'",
-  ].join('; '));
   next();
 });
 
-// CORS — restrict to FRONTEND_URL in production, allow all in development
+// CORS — restrict to FRONTEND_URL in production; explicit localhost allowlist in dev
 const isProd = process.env.NODE_ENV === 'production';
+const isDev = process.env.NODE_ENV === 'development';
 app.use(cors({
-  origin: isProd ? (process.env.FRONTEND_URL || false) : true,
+  origin: isProd
+    ? (process.env.FRONTEND_URL || false)
+    : isDev
+      ? ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173']
+      : false,  // NODE_ENV not set — deny by default for safety
   credentials: true,
 }));
 
@@ -69,6 +67,10 @@ app.use('/api/webhooks', webhookRoutes);
 
 // JSON parser for all other routes
 app.use(express.json());
+
+// Cookie parser for httpOnly JWT cookies
+const cookieParser = require('cookie-parser');
+app.use(cookieParser());
 
 // Rate limiting for auth routes
 const authLimiter = rateLimit({
@@ -107,8 +109,13 @@ app.use('/api/auth', authRoutes);
 app.use('/api/migrations', migrationRoutes);
 app.use('/api/admin', adminRoutes);
 
-// Public pricing endpoint (no auth required)
-app.get('/api/pricing', migrationRoutes.getPricingHandler);
+// Public routes (no auth required) with dedicated rate limiter
+const publicLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  message: { error: 'Too many requests, please try again later' },
+});
+app.use('/api', publicLimiter, publicRoutes);
 
 // Health check — verifies database connectivity
 app.get('/api/health', async (req, res) => {
@@ -121,8 +128,8 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-// API documentation (Swagger UI)
-if (process.env.NODE_ENV !== 'production') {
+// API documentation (Swagger UI) — only in explicit development mode
+if (process.env.NODE_ENV === 'development') {
   const { mountSwagger } = require('./swagger');
   mountSwagger(app);
   logger.info('API docs available at /api/docs');
@@ -141,6 +148,9 @@ async function start() {
     // Run database migrations
     await migrate();
     logger.info('Database ready');
+
+    // Purge credentials from completed migrations older than 30 days
+    await purgeExpiredCredentials();
 
     // Recover any stuck migrations from before restart
     await recoverStuckMigrations();

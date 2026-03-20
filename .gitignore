@@ -8,3 +8,7 @@ tsconfig.tsbuildinfo
 .mcp.json
 test-results/
 playwright-report/
+
+# Replit artifacts
+.replit
+replit.md

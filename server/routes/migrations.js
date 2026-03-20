@@ -4,20 +4,9 @@ const { encrypt, decrypt } = require('../encryption');
 const { authenticateToken } = require('../auth');
 const GuestyClient = require('../guestyClient');
 const { getTierFromListings, calculatePerListingCents, getAddonPriceMap } = require('../pricing');
+const { logger } = require('../logger');
 
 const router = express.Router();
-
-// Stripe is initialized once at module load so configuration errors surface at
-// startup rather than at request time. Returns null when the key is absent so
-// that individual handlers can return a clear 503 instead of crashing.
-let _stripe = null;
-function getStripe() {
-  if (!_stripe) {
-    if (!process.env.STRIPE_SECRET_KEY) return null;
-    _stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-  }
-  return _stripe;
-}
 
 // All routes require authentication
 router.use(authenticateToken);
@@ -28,6 +17,15 @@ const ADDON_PRICE_MAP = getAddonPriceMap();
 
 router.post('/preflight', async (req, res) => {
   try {
+    // Check email verification before allowing migration
+    const userResult = await pool.query(
+      'SELECT email_verified FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    if (!userResult.rows[0]?.email_verified) {
+      return res.status(403).json({ error: 'Please verify your email address before starting a migration.' });
+    }
+
     const { sourceClientId, sourceClientSecret, destClientId, destClientSecret } = req.body;
 
     if (!sourceClientId || !sourceClientSecret || !destClientId || !destClientSecret) {
@@ -59,6 +57,10 @@ router.post('/preflight', async (req, res) => {
         sourceClient.getCount('/tasks-open-api/tasks'),
       ]);
 
+      // l.pictures is an array of picture objects, each with .original and/or
+      // .thumbnail URLs (not plain strings). The count here is the total number
+      // of picture objects across all listings; actual URL extraction happens in
+      // the migration engine (see migrationEngine.js).
       const photoCount = allListings.reduce(
         (sum, l) => sum + (Array.isArray(l.pictures) ? l.pictures.length : 0), 0
       );
@@ -76,6 +78,7 @@ router.post('/preflight', async (req, res) => {
         automations,
         tasks,
         photos: photoCount,
+        listingDetails: allListings.map(l => ({ id: l._id, title: l.title || l.nickname || `Listing ${l._id}` })),
       };
     } catch (err) {
       return res.status(400).json({
@@ -129,7 +132,7 @@ router.post('/preflight', async (req, res) => {
       pricing,
     });
   } catch (err) {
-    console.error('Preflight error:', err);
+    logger.error('Preflight error', { error: err.message });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -139,7 +142,7 @@ router.post('/preflight', async (req, res) => {
 router.post('/:id/checkout', async (req, res) => {
   try {
     const { id } = req.params;
-    const { selectedCategories, pricingMode = 'flat_tier', addOns = [] } = req.body;
+    const { selectedCategories, pricingMode = 'flat_tier', addOns = [], selectedListingIds } = req.body;
 
     const migResult = await pool.query(
       'SELECT * FROM migrations WHERE id = $1 AND user_id = $2',
@@ -152,6 +155,14 @@ router.post('/:id/checkout', async (req, res) => {
 
     const migration = migResult.rows[0];
     const manifest = migration.manifest;
+
+    // Store selected listing IDs for pilot mode
+    if (selectedListingIds && Array.isArray(selectedListingIds) && selectedListingIds.length > 0) {
+      await pool.query(
+        `UPDATE migrations SET selected_listing_ids = $1 WHERE id = $2`,
+        [JSON.stringify(selectedListingIds), id]
+      );
+    }
 
     // ── Beta users bypass payment entirely ───────────────────────────────────────
     const betaCheck = await pool.query(
@@ -174,8 +185,13 @@ router.post('/:id/checkout', async (req, res) => {
       return res.json({ betaBypassed: true, migrationId: id });
     }
 
+    // Pilot mode: use selected listing count for pricing if present
+    const effectiveListingCount = (selectedListingIds && Array.isArray(selectedListingIds) && selectedListingIds.length > 0)
+      ? selectedListingIds.length
+      : manifest.listings;
+
     // Block enterprise_plus from checkout
-    const tierInfo = getTierFromListings(manifest.listings);
+    const tierInfo = getTierFromListings(effectiveListingCount);
     if (tierInfo.requiresQuote) {
       return res.status(400).json({
         error: 'Accounts with 500+ listings require a custom quote. Please contact support.',
@@ -188,12 +204,22 @@ router.post('/:id/checkout', async (req, res) => {
 
     if (pricingMode === 'per_listing') {
       // Per-listing graduated pricing — compute total server-side, use price_data
-      const totalCents = calculatePerListingCents(manifest.listings);
+      const totalCents = calculatePerListingCents(effectiveListingCount);
       line_items.push({
         price_data: {
           currency: 'usd',
           product: process.env.STRIPE_PRODUCT_PER_LISTING,
           unit_amount: totalCents,
+        },
+        quantity: 1,
+      });
+    } else if (tierInfo.tier === 'starter') {
+      // Starter tier uses dynamic per-listing formula — use price_data
+      line_items.push({
+        price_data: {
+          currency: 'usd',
+          product: process.env.STRIPE_PRODUCT_STARTER || process.env.STRIPE_PRODUCT_PER_LISTING,
+          unit_amount: tierInfo.amountCents,
         },
         quantity: 1,
       });
@@ -216,10 +242,10 @@ router.post('/:id/checkout', async (req, res) => {
     }
 
     // Create Stripe Checkout session
-    const stripe = getStripe();
-    if (!stripe) {
+    if (!process.env.STRIPE_SECRET_KEY) {
       return res.status(503).json({ error: 'Payment processing is not configured' });
     }
+    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items,
@@ -248,7 +274,7 @@ router.post('/:id/checkout', async (req, res) => {
 
     res.json({ checkoutUrl: session.url });
   } catch (err) {
-    console.error('Checkout error:', err);
+    logger.error('Checkout error', { error: err.message });
     res.status(500).json({ error: 'Failed to create checkout session' });
   }
 });
@@ -278,7 +304,7 @@ router.get('/:id/status', async (req, res) => {
       logs: logsResult.rows,
     });
   } catch (err) {
-    console.error('Status error:', err);
+    logger.error('Status error', { error: err.message });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -300,7 +326,7 @@ router.get('/:id/report', async (req, res) => {
 
     res.json({ diffReport: migResult.rows[0].diff_report });
   } catch (err) {
-    console.error('Report error:', err);
+    logger.error('Report error', { error: err.message });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -317,13 +343,29 @@ router.post('/:id/retry', async (req, res) => {
     if (migResult.rows.length === 0) {
       return res.status(404).json({ error: 'Migration not found or not retryable' });
     }
+
+    const migration = migResult.rows[0];
+
+    // Enforce max 3 retries
+    if ((migration.retry_count || 0) >= 3) {
+      return res.status(429).json({ error: 'Maximum retry limit reached' });
+    }
+
+    // Enforce 5-minute cooldown since last completion
+    if (migration.completed_at) {
+      const cooldownMs = 5 * 60 * 1000;
+      const elapsed = Date.now() - new Date(migration.completed_at).getTime();
+      if (elapsed < cooldownMs) {
+        return res.status(429).json({ error: 'Please wait before retrying' });
+      }
+    }
+
     await pool.query(
-      "UPDATE migrations SET status = 'paid', error_message = NULL WHERE id = $1",
+      "UPDATE migrations SET status = 'paid', error_message = NULL, retry_count = retry_count + 1 WHERE id = $1",
       [id]
     );
 
     // Retain add-on priority for retries
-    const migration = migResult.rows[0];
     const addons = migration.selected_addons || [];
     const priority = addons.includes('priority') ? 1 : 10;
 
@@ -331,7 +373,7 @@ router.post('/:id/retry', async (req, res) => {
     await enqueueMigration(id, { priority });
     res.json({ success: true });
   } catch (err) {
-    console.error('Retry error:', err);
+    logger.error('Retry error', { error: err.message });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -344,7 +386,7 @@ router.post('/:id/demo-activate', async (req, res) => {
     }
 
     const { id } = req.params;
-    const { selectedCategories } = req.body;
+    const { selectedCategories, selectedListingIds } = req.body;
 
     const migResult = await pool.query(
       "SELECT * FROM migrations WHERE id = $1 AND user_id = $2 AND status = 'pending'",
@@ -356,8 +398,12 @@ router.post('/:id/demo-activate', async (req, res) => {
     }
 
     await pool.query(
-      "UPDATE migrations SET status = 'paid', selected_categories = $1 WHERE id = $2",
-      [selectedCategories || ['custom_fields', 'rate_strategies', 'fees', 'taxes', 'listings', 'guests', 'owners', 'saved_replies', 'reservations', 'automations', 'tasks'], id]
+      "UPDATE migrations SET status = 'paid', selected_categories = $1, selected_listing_ids = $2 WHERE id = $3",
+      [
+        selectedCategories || ['custom_fields', 'rate_strategies', 'fees', 'taxes', 'listings', 'guests', 'owners', 'saved_replies', 'reservations', 'automations', 'tasks'],
+        selectedListingIds ? JSON.stringify(selectedListingIds) : null,
+        id,
+      ]
     );
 
     const { enqueueMigration } = require('../queue');
@@ -365,7 +411,7 @@ router.post('/:id/demo-activate', async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error('Demo activate error:', err);
+    logger.error('Demo activate error', { error: err.message });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -380,26 +426,9 @@ router.get('/', async (req, res) => {
     );
     res.json({ migrations: result.rows });
   } catch (err) {
-    console.error('List migrations error:', err);
+    logger.error('List migrations error', { error: err.message });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
-// ── GET /api/migrations/pricing — public pricing info ───────────────────────
-// Note: this route does not require authentication and is mounted on the
-// parent router so it can be called from the landing page.
-
-router.getPricingHandler = (req, res) => {
-  const { PRICING_TIERS, ADDON_DEFINITIONS } = require('../pricing');
-  const tiers = PRICING_TIERS.map(t => ({
-    tier: t.tier,
-    maxListings: t.maxListings,
-    amountCents: t.amountCents,
-    displayPrice: t.displayPrice,
-    popular: t.popular,
-  }));
-  tiers.push({ tier: 'enterprise_plus', maxListings: null, amountCents: null, displayPrice: 'Custom', popular: false });
-  res.json({ tiers, addOns: ADDON_DEFINITIONS });
-};
 
 module.exports = router;

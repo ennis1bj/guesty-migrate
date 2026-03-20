@@ -21,6 +21,79 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "GuestyMigrate",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web",
+      "description": "Self-serve migration tool for Guesty property management accounts. Transfer listings, reservations, guests, and all 11 data categories between accounts.",
+      "url": "https://guestymigrate.com",
+      "offers": {
+        "@type": "AggregateOffer",
+        "lowPrice": "51",
+        "highPrice": "1499",
+        "priceCurrency": "USD"
+      }
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "How long does a migration take?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Most migrations complete in under 30 minutes. Larger accounts with 100+ listings and thousands of photos may take a couple of hours. You can close the browser and check back — we'll email you when it's done."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Do I need to disconnect my channels first?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. To avoid booking conflicts, disconnect your channels (Airbnb, Vrbo, Booking.com) from the source account before migrating. You can reconnect them to the destination account after migration completes."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What happens to channel reservations?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Channel reservations (Airbnb, Vrbo, etc.) are automatically skipped — they're managed by the OTA and will re-sync when you reconnect channels. Only direct/manual reservations are migrated."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is my data secure?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Absolutely. All API credentials are encrypted with AES-256 at rest and never stored in plain text. We connect to Guesty via their official Open API over HTTPS. You can also export or delete all your data at any time."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What if something goes wrong?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The migration engine handles rate limits and recovers from partial failures automatically. If a category fails, you can retry just that category without being charged again. A verification diff report confirms completeness."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can I choose which data to migrate?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. After connecting, you'll see a manifest of all your source data. You can select or deselect individual categories — only pay for what you need."
+          }
+        }
+      ]
+    }
+    </script>
   </head>
   <body class="bg-[#fafaf8] text-slate-900 antialiased font-sans">
     <div id="root"></div>

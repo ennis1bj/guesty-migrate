@@ -124,7 +124,16 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              <p className="text-sm text-slate-400 mb-3 font-mono">{m.id}</p>
+              <p className="text-base font-semibold text-slate-900 mb-1">
+                Migration #{migrations.length - migrations.indexOf(m)} &mdash;{' '}
+                {new Date(m.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                {m.manifest?.listings != null && (
+                  <span className="text-slate-400 font-normal text-sm ml-2">
+                    ({m.manifest.listings} {m.manifest.listings === 1 ? 'listing' : 'listings'})
+                  </span>
+                )}
+              </p>
+              <p className="text-xs text-slate-400 mb-3 font-mono">{m.id}</p>
 
               {m.manifest && (
                 <div className="flex flex-wrap gap-3">

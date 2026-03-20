@@ -17,7 +17,7 @@ function generateToken(user) {
 
 function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  const token = (authHeader && authHeader.split(' ')[1]) || req.cookies?.token;
 
   if (!token) {
     return res.status(401).json({ error: 'Authentication required' });
@@ -32,9 +32,20 @@ function authenticateToken(req, res, next) {
   }
 }
 
-function requireAdmin(req, res, next) {
+async function requireAdmin(req, res, next) {
   if (!req.user || !req.user.is_admin) {
     return res.status(403).json({ error: 'Admin access required' });
+  }
+  // Re-verify admin status from the database on each request to prevent
+  // privilege escalation via stale JWT claims
+  try {
+    const { pool } = require('./db');
+    const result = await pool.query('SELECT is_admin FROM users WHERE id = $1', [req.user.id]);
+    if (!result.rows[0]?.is_admin) {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+  } catch (err) {
+    return res.status(500).json({ error: 'Authorization check failed' });
   }
   next();
 }

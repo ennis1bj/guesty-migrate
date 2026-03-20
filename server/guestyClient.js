@@ -242,6 +242,16 @@ class GuestyClient {
     if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
       throw new Error(`Photo URL must be HTTP/HTTPS, got: ${parsedUrl.protocol}`);
     }
+    // Block private/internal IP ranges to prevent SSRF
+    const hostname = parsedUrl.hostname;
+    const BLOCKED_PATTERNS = [
+      /^127\./, /^10\./, /^172\.(1[6-9]|2\d|3[01])\./, /^192\.168\./,
+      /^0\./, /^169\.254\./, /^::1$/, /^fc00:/, /^fe80:/, /^fd/,
+      /^localhost$/i, /\.local$/i, /\.internal$/i,
+    ];
+    if (BLOCKED_PATTERNS.some(p => p.test(hostname))) {
+      throw new Error(`Photo URL hostname blocked (private/internal): ${hostname}`);
+    }
 
     // Download image with 15s timeout
     let imageResponse;

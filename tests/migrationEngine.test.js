@@ -137,6 +137,53 @@ describe('classifyListings (unit)', () => {
   });
 });
 
+describe('extractPhotoUrl', () => {
+  let extractPhotoUrl;
+  beforeAll(() => {
+    extractPhotoUrl = require('../server/migrationEngine').extractPhotoUrl;
+  });
+
+  test('extracts .original URL from picture object', () => {
+    const pic = { original: 'https://img.com/photo.jpg', thumbnail: 'https://img.com/thumb.jpg' };
+    expect(extractPhotoUrl(pic)).toBe('https://img.com/photo.jpg');
+  });
+
+  test('falls back to .thumbnail when .original is missing', () => {
+    const pic = { thumbnail: 'https://img.com/thumb.jpg' };
+    expect(extractPhotoUrl(pic)).toBe('https://img.com/thumb.jpg');
+  });
+
+  test('passes through plain string URL as-is', () => {
+    expect(extractPhotoUrl('https://img.com/photo.jpg')).toBe('https://img.com/photo.jpg');
+  });
+
+  test('returns null for object with no usable URL', () => {
+    expect(extractPhotoUrl({})).toBeNull();
+  });
+
+  test('returns null for null entry', () => {
+    expect(extractPhotoUrl(null)).toBeNull();
+  });
+
+  test('handles mixed array of objects and strings', () => {
+    const pics = [
+      { original: 'https://img.com/a.jpg', thumbnail: 'https://img.com/a_thumb.jpg' },
+      'https://img.com/b.jpg',
+      { thumbnail: 'https://img.com/c_thumb.jpg' },
+      null,
+      { url: 'https://img.com/d.jpg' },
+    ];
+    const results = pics.map(extractPhotoUrl);
+    expect(results).toEqual([
+      'https://img.com/a.jpg',
+      'https://img.com/b.jpg',
+      'https://img.com/c_thumb.jpg',
+      null,
+      'https://img.com/d.jpg',
+    ]);
+  });
+});
+
 describe('groupContiguousDays (unit)', () => {
   function groupContiguousDays(days) {
     if (!days || days.length === 0) return [];

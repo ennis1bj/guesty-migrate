@@ -88,6 +88,12 @@ router.post('/register',
         logger.warn('Failed to send verification email', { error: emailErr.message });
       }
 
+      res.cookie('token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+      });
       res.status(201).json({ token, user: { id: user.id, email: user.email, is_demo: user.is_demo, is_beta: false, beta_expires_at: null, is_admin: false, email_verified: false } });
     } catch (err) {
       logger.error('Register error', { error: err.message });
@@ -146,6 +152,12 @@ router.post('/login',
       }
 
       const token = generateToken(user);
+      res.cookie('token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+      });
       res.json({ token, user: { id: user.id, email: user.email, is_demo: user.is_demo, is_beta: user.is_beta, beta_expires_at: user.beta_expires_at, is_admin: user.is_admin, email_verified: user.email_verified } });
     } catch (err) {
       logger.error('Login error', { error: err.message });
@@ -238,6 +250,36 @@ router.post('/reset-password',
     }
   }
 );
+
+// ── POST /api/auth/logout ──────────────────────────────────────────────────
+
+router.post('/logout', (req, res) => {
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+  });
+  res.json({ success: true, message: 'Logged out' });
+});
+
+// ── GET /api/auth/me ──────────────────────────────────────────────────────
+
+router.get('/me', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, email, is_demo, is_beta, beta_expires_at, is_admin, email_verified FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const user = result.rows[0];
+    res.json({ user: { id: user.id, email: user.email, is_demo: user.is_demo, is_beta: user.is_beta, beta_expires_at: user.beta_expires_at, is_admin: user.is_admin, email_verified: user.email_verified } });
+  } catch (err) {
+    logger.error('Get current user error', { error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 // ── GDPR Data Subject Rights ────────────────────────────────────────────────
 

@@ -18,6 +18,13 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" />;
 }
 
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated, user } = useAuth();
+  if (!isAuthenticated) return <Navigate to="/login" />;
+  if (!user?.is_admin) return <Navigate to="/dashboard" />;
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <div className="min-h-screen bg-[#fafaf8]">
@@ -50,9 +57,9 @@ export default function App() {
         <Route
           path="/admin"
           element={
-            <ProtectedRoute>
+            <AdminRoute>
               <Admin />
-            </ProtectedRoute>
+            </AdminRoute>
           }
         />
       </Routes>

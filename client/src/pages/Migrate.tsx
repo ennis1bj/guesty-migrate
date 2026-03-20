@@ -96,6 +96,10 @@ export default function Migrate() {
 
   const [migrationStatus, setMigrationStatus] = useState<MigrationStatus | null>(null);
 
+  const [pilotMode, setPilotMode] = useState(false);
+  const [selectedListingIds, setSelectedListingIds] = useState<string[]>([]);
+  const [allListingIds, setAllListingIds] = useState<string[]>([]);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [channelConfirmed, setChannelConfirmed] = useState(false);
@@ -154,6 +158,10 @@ export default function Migrate() {
       setMigrationId(data.migrationId);
       setManifest(data.manifest);
       setPricing(data.pricing);
+      // Store listing IDs for pilot mode
+      if (data.manifest?.listingDetails) {
+        setAllListingIds(data.manifest.listingDetails.map((l: any) => l.id));
+      }
       setCurrentStep(1);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to connect to Guesty accounts');
@@ -175,6 +183,7 @@ export default function Migrate() {
         selectedCategories,
         pricingMode,
         addOns: selectedAddOns,
+        selectedListingIds: pilotMode ? selectedListingIds : undefined,
       });
       window.location.href = data.checkoutUrl;
     } catch (err: any) {
@@ -189,7 +198,10 @@ export default function Migrate() {
     setError('');
     setLoading(true);
     try {
-      await api.post(`/migrations/${migrationId}/demo-activate`, { selectedCategories });
+      await api.post(`/migrations/${migrationId}/demo-activate`, {
+        selectedCategories,
+        selectedListingIds: pilotMode ? selectedListingIds : undefined,
+      });
       setCurrentStep(3);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to activate demo migration');
@@ -207,6 +219,7 @@ export default function Migrate() {
         selectedCategories,
         pricingMode,
         addOns: selectedAddOns,
+        selectedListingIds: pilotMode ? selectedListingIds : undefined,
       });
       setCurrentStep(3);
     } catch (err: any) {
@@ -418,6 +431,85 @@ export default function Migrate() {
             Booking.com) from the source account. Channel reservations cannot be
             migrated and will be skipped automatically.
           </div>
+
+          {/* Pilot Mode Listing Picker */}
+          {manifest.listings > 0 && selectedCategories.includes('listings') && (
+            <div className="mt-6 p-5 bg-white border border-stone-200 rounded-xl">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-bold text-slate-900">Listing Selection</h3>
+                  <p className="text-sm text-slate-400">Choose which listings to migrate</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => { setPilotMode(false); setSelectedListingIds([]); }}
+                    className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                      !pilotMode ? 'bg-amber-500 text-slate-900' : 'bg-stone-100 text-slate-600 hover:bg-stone-200'
+                    }`}
+                  >
+                    Migrate All
+                  </button>
+                  <button
+                    onClick={() => setPilotMode(true)}
+                    className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                      pilotMode ? 'bg-amber-500 text-slate-900' : 'bg-stone-100 text-slate-600 hover:bg-stone-200'
+                    }`}
+                  >
+                    Pilot Mode
+                  </button>
+                </div>
+              </div>
+
+              {pilotMode && (
+                <div>
+                  <p className="text-sm text-slate-500 mb-3">
+                    Select specific listings to migrate. Dependent items (reservations, automations, tasks, saved replies) will be scoped to these listings only.
+                  </p>
+                  <div className="flex items-center gap-2 mb-3">
+                    <button
+                      onClick={() => setSelectedListingIds(allListingIds)}
+                      className="text-xs text-amber-600 hover:text-amber-700 font-medium"
+                    >
+                      Select all
+                    </button>
+                    <span className="text-xs text-slate-300">|</span>
+                    <button
+                      onClick={() => setSelectedListingIds([])}
+                      className="text-xs text-amber-600 hover:text-amber-700 font-medium"
+                    >
+                      Clear all
+                    </button>
+                    <span className="text-xs text-slate-400 ml-auto">
+                      {selectedListingIds.length} of {allListingIds.length} selected
+                    </span>
+                  </div>
+                  <div className="max-h-60 overflow-y-auto border border-stone-100 rounded-lg">
+                    {(manifest as any).listingDetails?.map((listing: { id: string; title: string }) => (
+                      <label
+                        key={listing.id}
+                        className="flex items-center gap-3 px-3 py-2 hover:bg-stone-50 cursor-pointer border-b border-stone-50 last:border-0"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedListingIds.includes(listing.id)}
+                          onChange={() => {
+                            setSelectedListingIds(prev =>
+                              prev.includes(listing.id)
+                                ? prev.filter(id => id !== listing.id)
+                                : [...prev, listing.id]
+                            );
+                          }}
+                          className="w-4 h-4 text-amber-500 rounded border-stone-300 focus:ring-amber-500/30"
+                        />
+                        <span className="text-sm text-slate-700 truncate">{listing.title}</span>
+                        <span className="text-xs text-slate-400 ml-auto flex-shrink-0 font-mono">{listing.id.slice(-8)}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="mt-8 p-5 bg-[#fafaf8] border border-stone-200 rounded-xl flex items-center justify-between">
             <div>

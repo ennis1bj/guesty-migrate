@@ -26,6 +26,28 @@ The migration engine respects dependency ordering (rate strategies → listings 
 
 GuestyMigrate automatically detects Multi-Unit/Complex listing hierarchies. Parent listings are migrated before sub-units, and `parentId` references are remapped to preserve the full parent-child structure in the destination account.
 
+## Screenshots
+
+### Step 1: Connect Your Accounts
+![Connect credentials](docs/screenshots/step-connect.png)
+Enter your source and destination Guesty Open API credentials. Both accounts are validated instantly before proceeding.
+
+### Step 2: Review Your Data
+![Review manifest](docs/screenshots/step-review.png)
+See a full manifest of your source account — listing counts, guests, reservations, automations, and more. Select or deselect categories as needed.
+
+### Step 3: Pay & Configure
+![Payment and pricing](docs/screenshots/step-payment.png)
+Choose flat-rate or per-listing pricing. Add optional add-ons like priority processing or a post-migration verify call. Pay securely via Stripe.
+
+### Step 4: Migrate & Verify
+![Migration progress](docs/screenshots/step-progress.png)
+Watch real-time progress as each category migrates. When complete, review the verification diff report confirming source-to-destination counts match.
+
+### Verification Report
+![Diff report](docs/screenshots/diff-report.png)
+A detailed report comparing source and destination counts for every category, including photo migration stats and calendar block transfers.
+
 ## Who It's For
 
 Property managers switching between Guesty accounts, agencies managing multiple Guesty accounts, or anyone who needs to consolidate or split Guesty account data.
@@ -72,7 +94,7 @@ Property managers switching between Guesty accounts, agencies managing multiple 
 
 ```bash
 # Clone the repository
-git clone <repo-url>
+git clone https://github.com/ennis1bj/guesty-migrate.git
 cd guesty-migrate
 
 # Copy environment variables
@@ -166,7 +188,7 @@ Express serves the built frontend from `client/dist` for all non-API routes.
 
 | Listings | Price |
 |----------|-------|
-| 1 – 10   | $149  |
+| 1 – 10   | $39 + $12/listing (capped at $149) |
 | 11 – 50  | $349  |
 | 51 – 150 | $699  |
 | 151 – 300| $999  |

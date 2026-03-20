@@ -4,6 +4,10 @@ const GuestyClient = require('./guestyClient');
 const { sendMigrationReport } = require('./email');
 const { logger } = require('./logger');
 
+function extractPhotoUrl(pic) {
+  return typeof pic === 'string' ? pic : (pic.original || pic.thumbnail || pic.url || null);
+}
+
 function getCategoryPath(category) {
   const paths = {
     custom_fields:   '/custom-fields',
@@ -267,6 +271,7 @@ const MIGRATION_ORDER = [
 const ALLOWED_EXTRA_COLUMNS = new Set([
   'results', 'diff_report', 'manifest', 'selected_categories',
   'selected_addons', 'pricing_mode', 'error_message', 'stripe_session_id',
+  'selected_listing_ids',
 ]);
 
 async function updateStatus(migrationId, status, extra = {}) {
@@ -363,6 +368,25 @@ async function runMigration(migrationId) {
       if (categoryDef.sortItems) {
         sourceItems = categoryDef.sortItems(sourceItems);
       }
+
+      // Pilot mode: filter listings by selected IDs
+      if (category === 'listings' && migration.selected_listing_ids) {
+        const selectedIds = new Set(migration.selected_listing_ids);
+        sourceItems = sourceItems.filter(item => selectedIds.has(item._id));
+        log.info(`Pilot mode: filtered to ${sourceItems.length} selected listings`);
+      }
+
+      // Pilot mode: scope dependent categories to migrated listings
+      const LISTING_DEPENDENT_CATEGORIES = ['reservations', 'automations', 'tasks', 'saved_replies'];
+      if (LISTING_DEPENDENT_CATEGORIES.includes(category) && migration.selected_listing_ids && idMaps.listings) {
+        const migratedListingIds = new Set(Object.keys(idMaps.listings));
+        sourceItems = sourceItems.filter(item => {
+          const lid = item.listingId || (Array.isArray(item.listingIds) && item.listingIds[0]);
+          return !lid || migratedListingIds.has(lid);
+        });
+        log.info(`Pilot mode: scoped ${category} to ${sourceItems.length} items matching migrated listings`);
+      }
+
       const sourceCount = sourceItems.length;
       let migratedCount = 0;
       let failedCount = 0;
@@ -403,7 +427,12 @@ async function runMigration(migrationId) {
             } else {
               const pictures = item.pictures || [];
               photoStats.found = pictures.length;
-              for (const photoUrl of pictures) {
+              for (const pic of pictures) {
+                const photoUrl = extractPhotoUrl(pic);
+                if (!photoUrl) {
+                  photoStats.skipped++;
+                  continue;
+                }
                 try {
                   await destClient.uploadListingPhoto(newId, photoUrl);
                   photoStats.migrated++;
@@ -561,4 +590,4 @@ async function runMigration(migrationId) {
   }
 }
 
-module.exports = { runMigration };
+module.exports = { runMigration, extractPhotoUrl };

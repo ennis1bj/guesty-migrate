@@ -19,7 +19,7 @@ GuestyMigrate is a self-serve data migration tool that transfers data between Gu
 ## 4. API Credentials
 
 - You provide Guesty Open API credentials (Client ID and Client Secret) for both source and destination accounts.
-- Your API credentials are encrypted at rest using AES-256-CBC encryption.
+- Your API credentials are encrypted at rest using AES-256-GCM authenticated encryption.
 - You are responsible for ensuring you have authorization to access and migrate data from both accounts.
 
 ## 5. Payment and Refunds
@@ -27,7 +27,7 @@ GuestyMigrate is a self-serve data migration tool that transfers data between Gu
 - The Service uses one-time payments processed through Stripe.
 - Pricing is based on the number of listings in the source account at the time of migration.
 - Payments are non-refundable once a migration has begun processing.
-- If a migration fails due to a Service error (not an API credential or rate limit issue), contact support to discuss resolution.
+- If a migration fails due to a Service error (not an API credential or rate limit issue), you may retry the migration at no additional cost. Contact support at support@guestymigrate.com if the retry does not resolve the issue.
 
 ## 6. Data Handling
 
@@ -64,8 +64,12 @@ These Terms are governed by and construed in accordance with the laws of the Sta
 
 ## 13. Changes to Terms
 
-We reserve the right to modify these Terms at any time. Continued use of the Service after changes constitutes acceptance of the updated Terms.
+We reserve the right to modify these Terms at any time. We will notify registered users of material changes by email at least 14 days before they take effect. Continued use of the Service after the effective date of changes constitutes acceptance of the updated Terms. If you do not agree to the updated Terms, you may delete your account before the effective date.
 
-## 14. Contact
+## 14. EU Consumer Right of Withdrawal
+
+If you are a consumer in the European Economic Area, you have a 14-day right of withdrawal from the date of purchase. By initiating a migration, you expressly consent to the immediate performance of the Service before the withdrawal period expires and acknowledge that you lose your right of withdrawal once the migration has begun processing.
+
+## 15. Contact
 
 For questions about these Terms, contact us at support@guestymigrate.com.

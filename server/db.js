@@ -82,6 +82,11 @@ const migrate = async () => {
       ALTER TABLE migrations ADD COLUMN IF NOT EXISTS pricing_mode TEXT DEFAULT 'flat_tier';
     `);
 
+    // ── Retry rate limiting ────────────────────────────────────────────────
+    await client.query(`
+      ALTER TABLE migrations ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0;
+    `);
+
     // ── Email verification & password reset columns ────────────────────────
     await client.query(`
       ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT false;
@@ -135,6 +140,11 @@ const migrate = async () => {
       );
     `);
 
+    // ── Pilot mode: selected listing IDs ────────────────────────────────────
+    await client.query(`
+      ALTER TABLE migrations ADD COLUMN IF NOT EXISTS selected_listing_ids JSONB;
+    `);
+
     console.log('Database migrations completed successfully');
   } finally {
     client.release();
@@ -151,4 +161,22 @@ if (require.main === module) {
     });
 }
 
-module.exports = { pool, migrate };
+const purgeExpiredCredentials = async () => {
+  try {
+    const result = await pool.query(`
+      UPDATE migrations
+      SET source_client_id = NULL, source_client_secret = NULL,
+          dest_client_id = NULL, dest_client_secret = NULL
+      WHERE status IN ('complete', 'complete_with_errors', 'failed')
+        AND completed_at < NOW() - INTERVAL '30 days'
+        AND source_client_id IS NOT NULL
+    `);
+    if (result.rowCount > 0) {
+      console.log(`Purged credentials from ${result.rowCount} expired migration(s)`);
+    }
+  } catch (err) {
+    console.error('Failed to purge expired credentials:', err.message);
+  }
+};
+
+module.exports = { pool, migrate, purgeExpiredCredentials };

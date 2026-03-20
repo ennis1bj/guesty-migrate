@@ -2,23 +2,18 @@ import axios from 'axios';
 
 const api = axios.create({
   baseURL: '/api',
-});
-
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
+  withCredentials: true,
 });
 
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401 || error.response?.status === 403) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
+      // Only redirect if we're not already on an auth page
+      const path = window.location.pathname;
+      if (path !== '/login' && path !== '/register' && path !== '/forgot-password' && path !== '/reset-password') {
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   }

@@ -25,47 +25,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
 
+  // On mount, try to restore session from httpOnly cookie via /api/auth/me
   useEffect(() => {
-    try {
-      const savedToken = localStorage.getItem('token');
-      const savedUser = localStorage.getItem('user');
-      if (savedToken && savedUser) {
-        const parsed = JSON.parse(savedUser);
-        if (parsed && typeof parsed === 'object' && parsed.id && parsed.email) {
-          setToken(savedToken);
-          setUser(parsed);
-        } else {
-          // Malformed user data — clear it
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
+    const fetchMe = async () => {
+      try {
+        const { data } = await api.get('/auth/me');
+        if (data.user && data.user.id && data.user.email) {
+          setUser(data.user);
+          setToken('cookie'); // Token is in httpOnly cookie, use sentinel value
         }
+      } catch {
+        // No valid session — clear state
+        setUser(null);
+        setToken(null);
       }
-    } catch {
-      // Corrupted localStorage — clear and start fresh
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-    }
+    };
+    fetchMe();
   }, []);
 
   const login = async (email: string, password: string) => {
     const { data } = await api.post('/auth/login', { email, password });
-    localStorage.setItem('token', data.token);
-    localStorage.setItem('user', JSON.stringify(data.user));
     setToken(data.token);
     setUser(data.user);
   };
 
   const register = async (email: string, password: string) => {
     const { data } = await api.post('/auth/register', { email, password });
-    localStorage.setItem('token', data.token);
-    localStorage.setItem('user', JSON.stringify(data.user));
     setToken(data.token);
     setUser(data.user);
   };
 
-  const logout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+  const logout = async () => {
+    try {
+      await api.post('/auth/logout');
+    } catch {
+      // Ignore errors on logout
+    }
     setToken(null);
     setUser(null);
   };
