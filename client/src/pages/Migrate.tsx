@@ -77,6 +77,7 @@ function calculatePerListingCents(listingCount: number): number {
 export default function Migrate() {
   const { user } = useAuth();
   const isDemo = !!user?.is_demo;
+  const isBeta = !!(user as any)?.is_beta;
   const [searchParams] = useSearchParams();
   const [currentStep, setCurrentStep] = useState(0);
   const [migrationId, setMigrationId] = useState<string | null>(null);
@@ -192,6 +193,24 @@ export default function Migrate() {
       setCurrentStep(3);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to activate demo migration');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBetaActivate = async () => {
+    if (!migrationId) return;
+    setError('');
+    setLoading(true);
+    try {
+      await api.post(`/migrations/${migrationId}/checkout`, {
+        selectedCategories,
+        pricingMode,
+        addOns: selectedAddOns,
+      });
+      setCurrentStep(3);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to activate beta migration');
     } finally {
       setLoading(false);
     }
@@ -616,17 +635,17 @@ export default function Migrate() {
               Migrating {selectedCategories.length} categories: {selectedCategories.join(', ')}
             </p>
 
-            {isDemo ? (
+            {isDemo || isBeta ? (
               <div className="space-y-3">
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 font-medium">
-                  Demo account — payment bypassed
+                <div className={`p-3 ${isBeta ? 'bg-purple-50 border-purple-200' : 'bg-amber-50 border-amber-200'} border rounded-xl text-sm ${isBeta ? 'text-purple-800' : 'text-amber-800'} font-medium`}>
+                  {isBeta ? 'Beta account — payment bypassed' : 'Demo account — payment bypassed'}
                 </div>
                 <button
-                  onClick={handleDemoActivate}
+                  onClick={isBeta ? handleBetaActivate : handleDemoActivate}
                   disabled={loading}
                   className="w-full bg-amber-500 hover:bg-amber-600 text-slate-900 px-8 py-3 rounded-xl font-semibold shadow-sm hover:shadow-md disabled:opacity-50 transition-all duration-200"
                 >
-                  {loading ? 'Starting...' : 'Start Migration (Demo)'}
+                  {loading ? 'Starting...' : `Start Migration (${isBeta ? 'Beta' : 'Demo'})`}
                 </button>
               </div>
             ) : (

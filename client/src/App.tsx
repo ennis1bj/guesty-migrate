@@ -9,6 +9,7 @@ import ResetPassword from './pages/ResetPassword';
 import VerifyEmail from './pages/VerifyEmail';
 import Migrate from './pages/Migrate';
 import Dashboard from './pages/Dashboard';
+import Admin from './pages/Admin';
 import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
 
@@ -43,6 +44,14 @@ export default function App() {
           element={
             <ProtectedRoute>
               <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute>
+              <Admin />
             </ProtectedRoute>
           }
         />

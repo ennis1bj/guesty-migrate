@@ -46,6 +46,22 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req, re
     }
   }
 
+  // ── Beta invoice paid ───────────────────────────────────────────────────────
+  if (event.type === 'invoice.paid') {
+    const invoice = event.data.object;
+    const stripeInvoiceId = invoice.id;
+
+    try {
+      await pool.query(
+        `UPDATE beta_invoices SET status = 'paid', updated_at = NOW() WHERE stripe_invoice_id = $1`,
+        [stripeInvoiceId]
+      );
+      console.log(`Beta invoice ${stripeInvoiceId} marked as paid`);
+    } catch (err) {
+      console.error('Error updating beta invoice status:', err);
+    }
+  }
+
   res.json({ received: true });
 });
 

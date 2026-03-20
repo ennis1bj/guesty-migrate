@@ -85,7 +85,7 @@ router.post('/register',
         logger.warn('Failed to send verification email', { error: emailErr.message });
       }
 
-      res.status(201).json({ token, user: { id: user.id, email: user.email, is_demo: user.is_demo, email_verified: false } });
+      res.status(201).json({ token, user: { id: user.id, email: user.email, is_demo: user.is_demo, is_beta: false, beta_expires_at: null, is_admin: false, email_verified: false } });
     } catch (err) {
       logger.error('Register error', { error: err.message });
       res.status(500).json({ error: 'Internal server error' });
@@ -130,7 +130,7 @@ router.post('/login',
 
       const { email, password } = req.body;
 
-      const result = await pool.query('SELECT id, email, password_hash, is_demo, email_verified FROM users WHERE email = $1', [email]);
+      const result = await pool.query('SELECT id, email, password_hash, is_demo, is_beta, beta_starts_at, beta_expires_at, is_admin, email_verified FROM users WHERE email = $1', [email]);
       if (result.rows.length === 0) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
@@ -142,7 +142,7 @@ router.post('/login',
       }
 
       const token = generateToken(user);
-      res.json({ token, user: { id: user.id, email: user.email, is_demo: user.is_demo, email_verified: user.email_verified } });
+      res.json({ token, user: { id: user.id, email: user.email, is_demo: user.is_demo, is_beta: user.is_beta, beta_expires_at: user.beta_expires_at, is_admin: user.is_admin, email_verified: user.email_verified } });
     } catch (err) {
       logger.error('Login error', { error: err.message });
       res.status(500).json({ error: 'Internal server error' });
