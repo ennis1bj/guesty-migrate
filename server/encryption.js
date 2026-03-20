@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const ALGORITHM_GCM = 'aes-256-gcm';
 // Legacy CBC kept for backward-compatible decryption of existing data
 const ALGORITHM_CBC = 'aes-256-cbc';
-const IV_LENGTH = 16; // 16 bytes for GCM (recommended) and CBC
+const IV_LENGTH = 12; // 12 bytes: NIST-recommended for AES-GCM (96-bit IV)
 const AUTH_TAG_LENGTH = 16; // 128-bit auth tag for GCM
 
 function getKey() {
