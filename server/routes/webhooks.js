@@ -1,11 +1,17 @@
 const express = require('express');
 const { pool } = require('../db');
 const { enqueueMigration } = require('../queue');
+const { logger } = require('../logger');
 
 const router = express.Router();
 
 // Stripe webhook — uses raw body for signature verification
 router.post('/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
+  if (!process.env.STRIPE_SECRET_KEY || !process.env.STRIPE_WEBHOOK_SECRET) {
+    logger.error('Stripe webhook called but STRIPE_SECRET_KEY or STRIPE_WEBHOOK_SECRET is not configured');
+    return res.status(503).json({ error: 'Stripe not configured' });
+  }
+
   const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
   const sig = req.headers['stripe-signature'];
 
@@ -13,7 +19,7 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req, re
   try {
     event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
   } catch (err) {
-    console.error('Stripe webhook signature verification failed:', err.message);
+    logger.error('Stripe webhook signature verification failed', { error: err.message });
     return res.status(400).json({ error: 'Invalid signature' });
   }
 
@@ -37,9 +43,9 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req, re
         const priority = addons.includes('priority') ? 1 : 10;
 
         await enqueueMigration(migrationId, { priority });
-        console.log(`Migration ${migrationId} paid and enqueued (priority=${priority})`);
+        logger.info(`Migration ${migrationId} paid and enqueued`, { priority });
       } catch (err) {
-        console.error('Error processing payment for migration:', err);
+        logger.error('Error processing payment for migration', { error: err.message, migrationId });
         // Return 500 so Stripe retries the webhook instead of silently succeeding
         return res.status(500).json({ error: 'Failed to enqueue migration' });
       }
@@ -56,9 +62,9 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req, re
         `UPDATE beta_invoices SET status = 'paid', updated_at = NOW() WHERE stripe_invoice_id = $1`,
         [stripeInvoiceId]
       );
-      console.log(`Beta invoice ${stripeInvoiceId} marked as paid`);
+      logger.info(`Beta invoice ${stripeInvoiceId} marked as paid`);
     } catch (err) {
-      console.error('Error updating beta invoice status:', err);
+      logger.error('Error updating beta invoice status', { error: err.message, stripeInvoiceId });
     }
   }
 
