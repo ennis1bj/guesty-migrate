@@ -14,8 +14,10 @@ PORT = "3001"
 FRONTEND_URL = "http://0.0.0.0:5000"
 NODE_ENV = "development"
 FROM_EMAIL = "noreply@guestymigrate.com"
-JWT_SECRET = "223652fb3e313f1f1ff127a67d813deeb3255b55559b7b955bb164190e77e9c1f09aae3a6552702d6d7f8d561c8d49915b02771c870beba69eeb0af4d02ff8f1"
-ENCRYPTION_KEY = "0728c3da741521557d4e4a9443928b4d80fd75e37202e47dac43282bd922e490"
+# IMPORTANT: Set JWT_SECRET and ENCRYPTION_KEY in Replit Secrets, NOT here.
+# Generate with: node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+# JWT_SECRET = <set in Replit Secrets>
+# ENCRYPTION_KEY = <set in Replit Secrets>
 
 [workflows]
 runButton = "Project"
