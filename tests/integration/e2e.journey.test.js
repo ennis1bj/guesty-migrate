@@ -16,6 +16,67 @@ process.env.ENCRYPTION_KEY = '0'.repeat(64);
 process.env.DATABASE_URL   = 'postgresql://test:test@localhost:5432/test';
 process.env.STRIPE_SECRET_KEY = 'sk_test_fake';
 
+// ── GitHub issue logging (best-effort; falls back to console.warn) ───────────
+const GITHUB_OWNER = 'ennis1bj';
+const GITHUB_REPO  = 'guesty-migrate';
+
+async function logGitHubIssue(title, body) {
+  try {
+    const { ReplitConnectors } = await import('@replit/connectors-sdk');
+    const connectors = new ReplitConnectors();
+    const response = await connectors.proxy(
+      'github',
+      `/repos/${GITHUB_OWNER}/${GITHUB_REPO}/issues`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: `[E2E API] ${title}`,
+          body: `${body}\n\n---\n*Logged automatically by the API E2E journey test suite.*`,
+          labels: ['bug', 'e2e'],
+        }),
+      },
+    );
+    if (!response.ok) {
+      const text = await response.text();
+      console.warn(`[github-issue] HTTP ${response.status}: ${text.slice(0, 200)}`);
+      return;
+    }
+    const issue = await response.json();
+    console.info(`[github-issue] Created #${issue.number}: ${issue.html_url}`);
+  } catch (err) {
+    console.warn(`[github-issue] Could not create issue "${title}": ${err.message}`);
+    console.warn(`[github-issue] Body:\n${body}`);
+  }
+}
+
+/**
+ * Checks an HTTP response against the expected status and logs a GitHub issue
+ * when there is a mismatch.  Always returns the response so tests can chain
+ * further assertions.
+ */
+async function checkResponse(description, res, expectedStatus) {
+  if (res.status !== expectedStatus) {
+    const body = typeof res.body === 'object' ? JSON.stringify(res.body, null, 2) : String(res.body);
+    await logGitHubIssue(
+      `Unexpected HTTP response: ${description}`,
+      [
+        `## Unexpected API Response`,
+        ``,
+        `**Description**: ${description}`,
+        `**Expected status**: ${expectedStatus}`,
+        `**Actual status**: ${res.status}`,
+        ``,
+        `**Response body**:`,
+        `\`\`\`json`,
+        body,
+        `\`\`\``,
+      ].join('\n'),
+    ).catch(() => {});
+  }
+  return res;
+}
+
 // ── In-memory database state (module-level — persists across tests) ───────────
 const db = {
   _uid: 0,
@@ -290,9 +351,11 @@ describe('E2E: Full user migration journey', () => {
 
   // Step 1 ─────────────────────────────────────────────────────────────────────
   test('Step 1 — register: POST /api/auth/register returns JWT + user', async () => {
-    const res = await request(app)
-      .post('/api/auth/register')
-      .send({ email: 'e2e-journey@example.com', password: 'SecurePass123!' });
+    const res = await checkResponse(
+      'POST /api/auth/register',
+      await request(app).post('/api/auth/register').send({ email: 'e2e-journey@example.com', password: 'SecurePass123!' }),
+      201,
+    );
 
     expect(res.status).toBe(201);
     expect(res.body.token).toBeDefined();
@@ -306,15 +369,19 @@ describe('E2E: Full user migration journey', () => {
 
   // Step 2 ─────────────────────────────────────────────────────────────────────
   test('Step 2 — preflight: POST /api/migrations/preflight validates credentials and returns manifest + pricing', async () => {
-    const res = await request(app)
-      .post('/api/migrations/preflight')
-      .set('Authorization', `Bearer ${authToken}`)
-      .send({
-        sourceClientId:     'src-client-id',
-        sourceClientSecret: 'src-client-secret',
-        destClientId:       'dst-client-id',
-        destClientSecret:   'dst-client-secret',
-      });
+    const res = await checkResponse(
+      'POST /api/migrations/preflight',
+      await request(app)
+        .post('/api/migrations/preflight')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          sourceClientId:     'src-client-id',
+          sourceClientSecret: 'src-client-secret',
+          destClientId:       'dst-client-id',
+          destClientSecret:   'dst-client-secret',
+        }),
+      200,
+    );
 
     expect(res.status).toBe(200);
     expect(res.body.migrationId).toBeDefined();
@@ -338,10 +405,14 @@ describe('E2E: Full user migration journey', () => {
 
   // Step 3 ─────────────────────────────────────────────────────────────────────
   test('Step 3 — demo-activate: POST /api/migrations/:id/demo-activate triggers synchronous migration', async () => {
-    const res = await request(app)
-      .post(`/api/migrations/${migrationId}/demo-activate`)
-      .set('Authorization', `Bearer ${authToken}`)
-      .send({ selectedCategories: ['custom_fields', 'fees', 'taxes', 'listings', 'guests', 'reservations'] });
+    const res = await checkResponse(
+      `POST /api/migrations/:id/demo-activate`,
+      await request(app)
+        .post(`/api/migrations/${migrationId}/demo-activate`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ selectedCategories: ['custom_fields', 'fees', 'taxes', 'listings', 'guests', 'reservations'] }),
+      200,
+    );
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
@@ -352,9 +423,13 @@ describe('E2E: Full user migration journey', () => {
 
   // Step 4 ─────────────────────────────────────────────────────────────────────
   test('Step 4 — status poll: GET /api/migrations/:id/status returns terminal state with logs', async () => {
-    const res = await request(app)
-      .get(`/api/migrations/${migrationId}/status`)
-      .set('Authorization', `Bearer ${authToken}`);
+    const res = await checkResponse(
+      `GET /api/migrations/:id/status`,
+      await request(app)
+        .get(`/api/migrations/${migrationId}/status`)
+        .set('Authorization', `Bearer ${authToken}`),
+      200,
+    );
 
     expect(res.status).toBe(200);
     expect(res.body.id).toBe(migrationId);

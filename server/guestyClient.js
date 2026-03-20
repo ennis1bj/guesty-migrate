@@ -3,8 +3,8 @@ const FormData = require('form-data');
 const { pool } = require('./db');
 const { encrypt, decrypt } = require('./encryption');
 
-const BASE_URL = 'https://open-api.guesty.com/v1';
-const AUTH_URL = 'https://open-api.guesty.com/oauth2/token';
+const BASE_URL = (process.env.GUESTY_BASE_URL || 'https://open-api.guesty.com') + '/v1';
+const AUTH_URL = (process.env.GUESTY_AUTH_URL || 'https://open-api.guesty.com') + '/oauth2/token';
 
 class GuestyClient {
   constructor({ clientId, clientSecret }) {

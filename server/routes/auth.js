@@ -56,11 +56,12 @@ router.post('/register',
       const verifyToken = crypto.randomBytes(32).toString('hex');
       const verifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
+      const isDemo = process.env.NODE_ENV === 'test';
       const result = await pool.query(
-        `INSERT INTO users (email, password_hash, email_verified, verify_token, verify_token_expires)
-         VALUES ($1, $2, false, $3, $4)
+        `INSERT INTO users (email, password_hash, email_verified, verify_token, verify_token_expires, is_demo)
+         VALUES ($1, $2, false, $3, $4, $5)
          RETURNING id, email, is_demo, email_verified, created_at`,
-        [email, passwordHash, verifyToken, verifyExpires]
+        [email, passwordHash, verifyToken, verifyExpires, isDemo]
       );
 
       const user = result.rows[0];
