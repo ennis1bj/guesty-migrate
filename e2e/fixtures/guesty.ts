@@ -111,10 +111,6 @@ export const test = base.extend<GuestyFixtures>({
     await context.route('**/v1/reservations',        (r) => r.fulfill({ json: gr.reservations }));
     await context.route('**/v1/automations',         (r) => r.fulfill({ json: gr.automations }));
     await context.route('**/v1/tasks-open-api/tasks',(r) => r.fulfill({ json: gr.tasks }));
-    await context.route('**/v1/**', (r) => {
-      if (r.request().method() === 'POST') r.fulfill({ status: 201, json: { _id: `created-mock` } });
-      else r.continue();
-    });
 
     // ── (b) Backend /api/* endpoints — deterministic Guesty-aggregated responses ─
     await context.route('**/api/auth/register', async (r) => {

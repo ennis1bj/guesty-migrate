@@ -6,3 +6,5 @@ client/dist/
 tsconfig.tsbuildinfo
 .claude/
 .mcp.json
+test-results/
+playwright-report/
