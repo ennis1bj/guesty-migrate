@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const bcrypt = require('bcryptjs');
 require('dotenv').config();
 
 if (!process.env.DATABASE_URL) {
@@ -146,6 +147,24 @@ const migrate = async () => {
     `);
 
     console.log('Database migrations completed successfully');
+
+    // ── Auto-seed admin from environment variables ──────────────────────────
+    const adminEmail    = process.env.ADMIN_EMAIL;
+    const adminPassword = process.env.ADMIN_PASSWORD;
+    if (adminEmail && adminPassword) {
+      const hash = await bcrypt.hash(adminPassword, 12);
+      const { rows } = await client.query(
+        `INSERT INTO users (email, password_hash, email_verified, is_admin)
+         VALUES ($1, $2, true, true)
+         ON CONFLICT (email) DO UPDATE
+           SET password_hash  = EXCLUDED.password_hash,
+               email_verified = true,
+               is_admin       = true
+         RETURNING id, email, is_admin`,
+        [adminEmail, hash],
+      );
+      console.log(`Admin account ready: ${rows[0].email} (id: ${rows[0].id})`);
+    }
   } finally {
     client.release();
   }
