@@ -5,6 +5,7 @@ const { authenticateToken } = require('../auth');
 const GuestyClient = require('../guestyClient');
 const { getTierFromListings, calculatePerListingCents, getAddonPriceMap } = require('../pricing');
 const { logger } = require('../logger');
+const { OperatorDeck } = require('../operatordeck');
 
 const router = express.Router();
 
@@ -126,6 +127,12 @@ router.post('/preflight', async (req, res) => {
       ? { tier: 'enterprise_plus', requiresQuote: true, perListingCents }
       : { tier: tierInfo.tier, amountCents: tierInfo.amountCents, perListingCents };
 
+    OperatorDeck.event('migration.started', {
+      migrationId: result.rows[0].id,
+      userId: req.user.id,
+      listings: manifest.listings,
+      tier: tierInfo.tier,
+    });
     res.json({
       migrationId: result.rows[0].id,
       manifest,
@@ -133,6 +140,7 @@ router.post('/preflight', async (req, res) => {
     });
   } catch (err) {
     logger.error('Preflight error', { error: err.message });
+    OperatorDeck.error('migration.preflight_error', { message: err.message, stack: err.stack, userId: req.user.id });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -182,6 +190,7 @@ router.post('/:id/checkout', async (req, res) => {
       );
       const { enqueueMigration } = require('../queue');
       await enqueueMigration(id, { priority: 1 }); // Beta users get priority
+      OperatorDeck.event('migration.beta_bypass', { migrationId: id, userId: req.user.id });
       return res.json({ betaBypassed: true, migrationId: id });
     }
 
@@ -272,9 +281,17 @@ router.post('/:id/checkout', async (req, res) => {
       ]
     );
 
+    OperatorDeck.event('migration.checkout_created', {
+      migrationId: id,
+      userId: req.user.id,
+      pricingMode,
+      tier: tierInfo.tier,
+      stripeSessionId: session.id,
+    });
     res.json({ checkoutUrl: session.url });
   } catch (err) {
     logger.error('Checkout error', { error: err.message });
+    OperatorDeck.error('migration.checkout_error', { message: err.message, stack: err.stack, migrationId: id, userId: req.user.id });
     res.status(500).json({ error: 'Failed to create checkout session' });
   }
 });
@@ -371,9 +388,11 @@ router.post('/:id/retry', async (req, res) => {
 
     const { enqueueMigration } = require('../queue');
     await enqueueMigration(id, { priority });
+    OperatorDeck.event('migration.retry', { migrationId: id, userId: req.user.id, retryCount: (migration.retry_count || 0) + 1 });
     res.json({ success: true });
   } catch (err) {
     logger.error('Retry error', { error: err.message });
+    OperatorDeck.error('migration.retry_error', { message: err.message, stack: err.stack, migrationId: id, userId: req.user.id });
     res.status(500).json({ error: 'Internal server error' });
   }
 });

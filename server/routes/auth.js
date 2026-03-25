@@ -5,6 +5,7 @@ const { body, validationResult } = require('express-validator');
 const { pool } = require('../db');
 const { generateToken, authenticateToken } = require('../auth');
 const { logger } = require('../logger');
+const { OperatorDeck } = require('../operatordeck');
 
 const router = express.Router();
 
@@ -94,9 +95,11 @@ router.post('/register',
         sameSite: 'strict',
         maxAge: 7 * 24 * 60 * 60 * 1000,
       });
+      OperatorDeck.event('user.signup', { userId: user.id, email: user.email });
       res.status(201).json({ token, user: { id: user.id, email: user.email, is_demo: user.is_demo, is_beta: false, beta_expires_at: null, is_admin: false, email_verified: false } });
     } catch (err) {
       logger.error('Register error', { error: err.message });
+      OperatorDeck.error('auth.register_error', { message: err.message, stack: err.stack });
       res.status(500).json({ error: 'Internal server error' });
     }
   }
@@ -158,9 +161,11 @@ router.post('/login',
         sameSite: 'strict',
         maxAge: 7 * 24 * 60 * 60 * 1000,
       });
+      OperatorDeck.event('user.login', { userId: user.id, email: user.email });
       res.json({ token, user: { id: user.id, email: user.email, is_demo: user.is_demo, is_beta: user.is_beta, beta_expires_at: user.beta_expires_at, is_admin: user.is_admin, email_verified: user.email_verified } });
     } catch (err) {
       logger.error('Login error', { error: err.message });
+      OperatorDeck.error('auth.login_error', { message: err.message, stack: err.stack });
       res.status(500).json({ error: 'Internal server error' });
     }
   }

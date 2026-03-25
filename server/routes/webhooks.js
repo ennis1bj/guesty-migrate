@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('../db');
 const { enqueueMigration } = require('../queue');
 const { logger } = require('../logger');
+const { OperatorDeck } = require('../operatordeck');
 
 const router = express.Router();
 
@@ -20,6 +21,7 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req, re
     event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
   } catch (err) {
     logger.error('Stripe webhook signature verification failed', { error: err.message });
+    OperatorDeck.error('stripe.webhook_signature_failed', { message: err.message });
     return res.status(400).json({ error: 'Invalid signature' });
   }
 
@@ -44,8 +46,15 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req, re
 
         await enqueueMigration(migrationId, { priority });
         logger.info(`Migration ${migrationId} paid and enqueued`, { priority });
+        OperatorDeck.event('payment.success', {
+          migrationId,
+          amount: session.amount_total,
+          currency: session.currency,
+          stripeSessionId: session.id,
+        });
       } catch (err) {
         logger.error('Error processing payment for migration', { error: err.message, migrationId });
+        OperatorDeck.error('payment.processing_error', { message: err.message, stack: err.stack, migrationId });
         // Return 500 so Stripe retries the webhook instead of silently succeeding
         return res.status(500).json({ error: 'Failed to enqueue migration' });
       }
@@ -63,8 +72,10 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req, re
         [stripeInvoiceId]
       );
       logger.info(`Beta invoice ${stripeInvoiceId} marked as paid`);
+      OperatorDeck.event('payment.beta_invoice_paid', { stripeInvoiceId, amount: invoice.amount_paid });
     } catch (err) {
       logger.error('Error updating beta invoice status', { error: err.message, stripeInvoiceId });
+      OperatorDeck.error('payment.beta_invoice_error', { message: err.message, stack: err.stack, stripeInvoiceId });
     }
   }
 
