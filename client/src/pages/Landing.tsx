@@ -239,7 +239,7 @@ interface AddOn {
 
 export default function Landing() {
   const [openFaq, setOpenFaq] = useState<number | null>(null);
-  const [pricingMode, setPricingMode] = useState<'flat' | 'per-listing'>('flat');
+  const [pricingMode, setPricingMode] = useState<'flat' | 'per-listing'>('per-listing');
   const [pricingTiers, setPricingTiers] = useState<PricingTier[]>(fallbackTiers);
   const [addOns, setAddOns] = useState<AddOn[]>(fallbackAddOns);
   const [pricingLoading, setPricingLoading] = useState(true);
@@ -755,16 +755,6 @@ export default function Landing() {
           <div className="flex justify-center mt-6 mb-10">
             <div className="inline-flex bg-stone-100 rounded-xl p-1">
               <button
-                onClick={() => setPricingMode('flat')}
-                className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all duration-200 ${
-                  pricingMode === 'flat'
-                    ? 'bg-white text-slate-900 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                Flat Tier
-              </button>
-              <button
                 onClick={() => setPricingMode('per-listing')}
                 className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all duration-200 ${
                   pricingMode === 'per-listing'
@@ -774,6 +764,16 @@ export default function Landing() {
               >
                 Per-Listing
               </button>
+              <button
+                onClick={() => setPricingMode('flat')}
+                className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all duration-200 ${
+                  pricingMode === 'flat'
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Flat Tier
+              </button>
             </div>
           </div>
 
@@ -781,28 +781,24 @@ export default function Landing() {
             <div className="max-w-2xl mx-auto">
               <div className="bg-white rounded-2xl border border-stone-200 shadow-sm p-8 text-center">
                 <h3 className="text-xl font-bold text-slate-900 mb-2">Graduated Per-Listing Pricing</h3>
-                <p className="text-slate-500 mb-6">Base fee of <span className="font-semibold text-slate-900">$39</span> plus a per-listing rate that decreases as your account grows</p>
+                <p className="text-slate-500 mb-6">Base fee of <span className="font-semibold text-slate-900">$79</span> plus a per-listing rate that decreases as your account grows</p>
                 <div className="space-y-3 text-left max-w-sm mx-auto">
                   <div className="flex justify-between items-center py-2 border-b border-stone-100">
-                    <span className="text-slate-600">Listings 1 – 10</span>
-                    <span className="font-semibold text-slate-900">$12 / listing</span>
-                  </div>
-                  <div className="flex justify-between items-center py-2 border-b border-stone-100">
-                    <span className="text-slate-600">Listings 11 – 50</span>
+                    <span className="text-slate-600">Listings 1 – 50</span>
                     <span className="font-semibold text-slate-900">$8 / listing</span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-stone-100">
-                    <span className="text-slate-600">Listings 51 – 150</span>
+                    <span className="text-slate-600">Listings 51 – 200</span>
                     <span className="font-semibold text-slate-900">$5 / listing</span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-stone-100">
-                    <span className="text-slate-600">Listings 151+</span>
-                    <span className="font-semibold text-slate-900">Flat tier pricing</span>
+                    <span className="text-slate-600">Listings 201+</span>
+                    <span className="font-semibold text-slate-900">$3 / listing</span>
                   </div>
                 </div>
                 <div className="mt-6 p-4 bg-amber-50 rounded-xl">
                   <p className="text-sm text-amber-800">
-                    <span className="font-semibold">Example:</span> 5 listings = $39 + (5 × $12) = <span className="font-bold">$99</span>
+                    <span className="font-semibold">Example:</span> 10 listings = $79 + (10 × $8) = <span className="font-bold">$159</span>
                   </p>
                 </div>
                 <Link
