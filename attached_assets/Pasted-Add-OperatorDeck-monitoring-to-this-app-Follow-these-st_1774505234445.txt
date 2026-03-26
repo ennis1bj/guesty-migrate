@@ -1,0 +1,78 @@
+Add OperatorDeck monitoring to this app. Follow these steps exactly:
+
+STEP 1 — Add these two secrets to this Replit app:
+OPERATORDECK_HOST = https://e089fd0f-9c04-4eb9-bfcd-d835dc5f6e2b-00-3k3kzwo3rqpyd.riker.replit.dev:5000
+OPERATORDECK_TOKEN = sdk_c5258919754c40cab4f51ff6c74d1ca3
+
+STEP 2 — Create a file called operatordeck.ts with this exact content:
+
+const OPERATORDECK_HOST = process.env.OPERATORDECK_HOST || '';
+const OPERATORDECK_TOKEN = process.env.OPERATORDECK_TOKEN || '';
+
+// Internal log buffer — flushed every 5 seconds or when 50 lines accumulate
+const _logBuffer: Array<{ level: string; message: string; source?: string; loggedAt: string }> = [];
+let _flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function _scheduleFlush() {
+  if (_flushTimer) return;
+  _flushTimer = setTimeout(() => {
+    _flushTimer = null;
+    _flush();
+  }, 5000);
+}
+
+async function _flush() {
+  if (_logBuffer.length === 0 || !OPERATORDECK_TOKEN || !OPERATORDECK_HOST) return;
+  const batch = _logBuffer.splice(0, 100);
+  try {
+    await fetch(`${OPERATORDECK_HOST}/api/ingest/log`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-sdk-token': OPERATORDECK_TOKEN },
+      body: JSON.stringify({ logs: batch }),
+    });
+  } catch {}
+}
+
+async function post(endpoint: string, body: object): Promise<void> {
+  if (!OPERATORDECK_TOKEN || !OPERATORDECK_HOST) return;
+  try {
+    await fetch(`${OPERATORDECK_HOST}${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-sdk-token': OPERATORDECK_TOKEN },
+      body: JSON.stringify(body),
+    });
+  } catch {}
+}
+
+export const OperatorDeck = {
+  event(eventType: string, payload?: object, severity: 'info' | 'warn' = 'info') {
+    post('/api/ingest/event', { eventType, severity, payload: payload || {} });
+  },
+  error(eventType: string, payload?: object) {
+    post('/api/ingest/error', { eventType, payload: payload || {} });
+  },
+  log(level: 'info' | 'warn' | 'error', message: string, source?: string) {
+    _logBuffer.push({ level, message: String(message), source, loggedAt: new Date().toISOString() });
+    if (_logBuffer.length >= 50) _flush();
+    else _scheduleFlush();
+  },
+  captureConsole() {
+    const orig = { log: console.log, warn: console.warn, error: console.error };
+    console.log = (...args: unknown[]) => { orig.log(...args); OperatorDeck.log('info', args.map(String).join(' '), 'console'); };
+    console.warn = (...args: unknown[]) => { orig.warn(...args); OperatorDeck.log('warn', args.map(String).join(' '), 'console'); };
+    console.error = (...args: unknown[]) => { orig.error(...args); OperatorDeck.log('error', args.map(String).join(' '), 'console'); };
+  },
+};
+
+STEP 3 — Instrument the app:
+
+In your main startup file (e.g. index.ts or server.ts), add these lines at the very top, before anything else runs:
+
+  import { OperatorDeck } from './operatordeck';
+  OperatorDeck.captureConsole(); // streams all console.log/warn/error output as logs automatically
+
+Then throughout the codebase:
+- Call OperatorDeck.event() on important business events (e.g. user signup, payment, login).
+- Call OperatorDeck.error() inside every catch block.
+- Call OperatorDeck.log('info' | 'warn' | 'error', message, source?) for any explicit log lines you want to capture beyond console output (e.g. OperatorDeck.log('info', 'Webhook received', 'stripe')).
+- Always fire-and-forget — never await or throw from OperatorDeck calls.
