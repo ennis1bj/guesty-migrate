@@ -7,9 +7,44 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
+// ── SSL configuration (#79) ────────────────────────────────────────────────────
+// Use explicit `ssl` object instead of deprecated sslmode query parameter.
+// This avoids the pg v8.11+ deprecation warning and prepares for pg v9 changes.
+//
+// DB_SSL options:
+//   'true' / '1'  — verify server certificate (rejectUnauthorized: true)
+//   'no-verify'   — connect with TLS but accept self-signed certs
+//   'false' / '0' — no SSL
+//   unset         — auto-detect from DATABASE_URL (ssl if sslmode present)
+function buildSslConfig() {
+  const dbSsl = process.env.DB_SSL;
+
+  if (dbSsl === 'false' || dbSsl === '0') {
+    return false;
+  }
+  if (dbSsl === 'no-verify') {
+    return { rejectUnauthorized: false };
+  }
+  if (dbSsl === 'true' || dbSsl === '1') {
+    return { rejectUnauthorized: true };
+  }
+
+  // Auto-detect: if DATABASE_URL contains sslmode, enable SSL explicitly
+  const url = process.env.DATABASE_URL || '';
+  if (url.includes('sslmode=')) {
+    return { rejectUnauthorized: true };
+  }
+
+  // No SSL indicator — let pg use its default behavior
+  return undefined;
+}
+
+const sslConfig = buildSslConfig();
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 10,
+  ...(sslConfig !== undefined ? { ssl: sslConfig } : {}),
 });
 
 const migrate = async () => {
