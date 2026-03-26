@@ -1,4 +1,6 @@
 require('dotenv').config();
+const { OperatorDeck } = require('./operatordeck');
+OperatorDeck.captureConsole();
 
 // Validate required environment variables at startup
 const REQUIRED_ENV = ['DATABASE_URL', 'JWT_SECRET', 'ENCRYPTION_KEY'];
