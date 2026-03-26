@@ -21,7 +21,7 @@ const cors = require('cors');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
 const { pool, migrate, purgeExpiredCredentials } = require('./db');
-const { initQueue, recoverStuckMigrations } = require('./queue');
+const { initQueue, recoverStuckMigrations, getQueueHealth } = require('./queue');
 const { logger, requestIdMiddleware } = require('./logger');
 
 const authRoutes = require('./routes/auth');
@@ -122,14 +122,29 @@ const publicLimiter = rateLimit({
 });
 app.use('/api', publicLimiter, publicRoutes);
 
-// Health check — verifies database connectivity
+// Health check — verifies database connectivity and reports job execution mode (#78)
 app.get('/api/health', async (req, res) => {
   try {
     await pool.query('SELECT 1');
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    const queueHealth = getQueueHealth();
+    const status = queueHealth.degraded ? 'degraded' : 'ok';
+    const statusCode = queueHealth.degraded ? 200 : 200; // still 200 — app works in degraded mode
+    res.status(statusCode).json({
+      status,
+      timestamp: new Date().toISOString(),
+      database: 'connected',
+      jobs: queueHealth,
+    });
   } catch (err) {
     logger.error('Health check failed', { error: err.message });
-    res.status(503).json({ status: 'degraded', timestamp: new Date().toISOString(), error: 'Database unreachable' });
+    const queueHealth = getQueueHealth();
+    res.status(503).json({
+      status: 'unhealthy',
+      timestamp: new Date().toISOString(),
+      database: 'unreachable',
+      error: 'Database unreachable',
+      jobs: queueHealth,
+    });
   }
 });
 
