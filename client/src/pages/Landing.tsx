@@ -72,19 +72,6 @@ const steps = [
 
 const fallbackTiers = [
   {
-    name: 'Starter',
-    listings: '1 – 10',
-    price: 'From $51',
-    popular: false,
-    subtitle: '$39 + $12/listing',
-    features: [
-      'All 11 data categories',
-      'Listings, photos & reservations',
-      'Verification diff report',
-      'Email support',
-    ],
-  },
-  {
     name: 'Growth',
     listings: '11 – 50',
     price: '$349',

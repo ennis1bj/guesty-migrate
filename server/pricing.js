@@ -6,7 +6,6 @@
  */
 
 const PRICING_TIERS = [
-  { tier: 'starter',      maxListings: 10,  amountCents: null,   displayPrice: '$39–$149', popular: false, type: 'per_listing', baseCents: 3900, perListingCents: 1200, capCents: 14900 },
   { tier: 'growth',       maxListings: 50,  amountCents: 34900,  displayPrice: '$349',     popular: false },
   { tier: 'professional', maxListings: 150, amountCents: 69900,  displayPrice: '$699',     popular: true  },
   { tier: 'business',     maxListings: 300, amountCents: 99900,  displayPrice: '$999',     popular: false },
@@ -14,7 +13,6 @@ const PRICING_TIERS = [
 ];
 
 const STRIPE_PRICE_ENV_KEYS = {
-  starter:      'STRIPE_PRICE_STARTER',
   growth:       'STRIPE_PRICE_GROWTH',
   professional: 'STRIPE_PRICE_PROFESSIONAL',
   business:     'STRIPE_PRICE_BUSINESS',
@@ -29,32 +27,22 @@ const ADDON_DEFINITIONS = [
 ];
 
 /**
- * Calculate the starter tier price for 1-10 listings.
- * Formula: max($39, $39 + $12 * listingCount), capped at $149
- * @param {number} count - number of listings (1-10)
- * @returns {number} price in cents
- */
-function calculateStarterTierCents(count) {
-  const computed = 3900 + 1200 * count;
-  return Math.min(Math.max(3900, computed), 14900);
-}
-
-/**
  * Get tier info from a listing count.
+ * Accounts with 10 or fewer listings use per-listing pricing.
+ * Flat tiers start at Growth (11–50 listings).
  * @param {number} count
  * @returns {{ tier: string, amountCents?: number, priceEnvKey?: string, requiresQuote?: boolean }}
  */
 function getTierFromListings(count) {
+  // Small accounts (1–10 listings) use per-listing pricing, not a flat tier
+  if (count <= 10) {
+    return {
+      tier: 'per_listing',
+      amountCents: calculatePerListingCents(count),
+    };
+  }
   for (const t of PRICING_TIERS) {
     if (count <= t.maxListings) {
-      // Starter tier uses per-listing formula
-      if (t.type === 'per_listing') {
-        return {
-          tier: t.tier,
-          amountCents: calculateStarterTierCents(count),
-          priceEnvKey: STRIPE_PRICE_ENV_KEYS[t.tier],
-        };
-      }
       return {
         tier: t.tier,
         amountCents: t.amountCents,
@@ -67,11 +55,13 @@ function getTierFromListings(count) {
 
 /**
  * Compute per-listing graduated price in cents.
- *   For 1-10 listings: $39 base + $12/listing (capped at $149)
  *   Base fee: $79 flat
  *   Listings 1–50:   $8.00 each
  *   Listings 51–200: $5.00 each
  *   Listings 201+:   $3.00 each
+ *
+ * Used for accounts with 1–10 listings (replacing the old flat starter tier)
+ * and for users who opt into the per-listing pricing mode.
  */
 function calculatePerListingCents(listingCount) {
   const baseCents = 7900;
@@ -102,6 +92,5 @@ module.exports = {
   ADDON_DEFINITIONS,
   getTierFromListings,
   calculatePerListingCents,
-  calculateStarterTierCents,
   getAddonPriceMap,
 };

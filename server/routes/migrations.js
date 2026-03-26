@@ -211,24 +211,14 @@ router.post('/:id/checkout', async (req, res) => {
     // ── Build Stripe line items ──────────────────────────────────────────
     const line_items = [];
 
-    if (pricingMode === 'per_listing') {
-      // Per-listing graduated pricing — compute total server-side, use price_data
+    if (pricingMode === 'per_listing' || tierInfo.tier === 'per_listing') {
+      // Per-listing pricing — compute total server-side, use price_data
       const totalCents = calculatePerListingCents(effectiveListingCount);
       line_items.push({
         price_data: {
           currency: 'usd',
           product: process.env.STRIPE_PRODUCT_PER_LISTING,
           unit_amount: totalCents,
-        },
-        quantity: 1,
-      });
-    } else if (tierInfo.tier === 'starter') {
-      // Starter tier uses dynamic per-listing formula — use price_data
-      line_items.push({
-        price_data: {
-          currency: 'usd',
-          product: process.env.STRIPE_PRODUCT_STARTER || process.env.STRIPE_PRODUCT_PER_LISTING,
-          unit_amount: tierInfo.amountCents,
         },
         quantity: 1,
       });
