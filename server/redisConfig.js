@@ -24,6 +24,8 @@ try {
 // ── State tracking (#78) ───────────────────────────────────────────────────────
 let redisAvailable = false;
 let reconnectTimer = null;
+let reconnectFailures = 0;
+const MAX_RECONNECT_FAILURES = 5; // stop loop after ~2.5 min of consecutive failures
 
 function isRedisAvailable() {
   return redisAvailable;
@@ -217,6 +219,13 @@ async function validateRedisConnection() {
 
   if (!client) return false;
 
+  // Replace the persistent error logger with a silent handler for validation
+  // clients — the try/catch below already handles and logs the error once.
+  client.removeAllListeners('error');
+  client.removeAllListeners('close');
+  client.removeAllListeners('reconnecting');
+  client.on('error', () => {}); // prevent unhandled-error crash
+
   try {
     await client.connect();
     const pong = await client.ping();
@@ -228,12 +237,11 @@ async function validateRedisConnection() {
     return false;
   } catch (err) {
     const isAuthError = /WRONGPASS|NOAUTH|ERR AUTH/.test(err.message);
+    const isSslError  = /SSL|TLS|ERR_SSL/.test(err.message || err.code || '');
     if (isAuthError) {
-      logger.error(
-        'Redis authentication failed — check REDIS_URL credentials. ' +
-        'Ensure special characters are percent-encoded and username format matches your Redis version (ACL vs legacy).',
-        { error: err.message }
-      );
+      logger.warn('Redis auth failed — check REDIS_URL credentials', { error: err.message });
+    } else if (isSslError) {
+      logger.warn('Redis TLS mismatch — check whether REDIS_URL should use redis:// or rediss://', { error: err.message });
     } else {
       logger.warn('Redis connection test failed', { error: err.message });
     }
@@ -252,12 +260,15 @@ async function validateRedisConnection() {
 function startReconnectLoop(onReconnect) {
   if (reconnectTimer) return; // already running
 
+  reconnectFailures = 0; // reset counter each time the loop starts
+
   reconnectTimer = setInterval(async () => {
     if (redisAvailable) return; // already connected, nothing to do
 
     logger.info('Attempting periodic Redis reconnection...');
     const ok = await validateRedisConnection();
     if (ok) {
+      reconnectFailures = 0;
       logger.info('Redis is reachable again — attempting queue re-initialization');
       if (typeof onReconnect === 'function') {
         try {
@@ -265,6 +276,15 @@ function startReconnectLoop(onReconnect) {
         } catch (err) {
           logger.error('Redis reconnect callback failed', { error: err.message });
         }
+      }
+    } else {
+      reconnectFailures += 1;
+      if (reconnectFailures >= MAX_RECONNECT_FAILURES) {
+        logger.warn(
+          `Redis unreachable after ${reconnectFailures} attempts — stopping reconnection loop. ` +
+          'App will continue in in-process mode. Fix REDIS_URL to re-enable queue.'
+        );
+        stopReconnectLoop();
       }
     }
   }, 30_000);
