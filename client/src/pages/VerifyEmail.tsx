@@ -76,28 +76,38 @@ export default function VerifyEmail() {
                 </svg>
               </div>
               <h2 className="text-xl font-bold text-slate-900 mb-2">Verification Failed</h2>
-              <p className="text-slate-500 mb-4">{error}</p>
+              <p className="text-slate-500 mb-6">{error}</p>
 
-              {isAuthenticated && (
-                <div className="mb-6">
-                  {resendStatus === 'sent' ? (
+              {/* Resend section — always visible */}
+              <div className="mb-6 p-4 bg-stone-50 border border-stone-200 rounded-xl text-left">
+                <p className="text-sm font-semibold text-slate-700 mb-1">Need a new link?</p>
+                {isAuthenticated ? (
+                  resendStatus === 'sent' ? (
                     <p className="text-sm text-emerald-600 font-medium">Verification email sent — check your inbox.</p>
                   ) : (
                     <>
+                      <p className="text-sm text-slate-500 mb-3">Request a fresh verification email below.</p>
                       {resendStatus === 'error' && (
                         <p className="text-sm text-red-600 mb-2">{resendError}</p>
                       )}
                       <button
                         onClick={handleResend}
                         disabled={resendStatus === 'loading'}
-                        className="w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-slate-900 px-6 py-2.5 rounded-xl font-semibold shadow-sm hover:shadow-md transition-all duration-200 mb-3"
+                        className="w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-slate-900 px-4 py-2 rounded-xl text-sm font-semibold shadow-sm hover:shadow-md transition-all duration-200"
                       >
                         {resendStatus === 'loading' ? 'Sending…' : 'Resend verification email'}
                       </button>
                     </>
-                  )}
-                </div>
-              )}
+                  )
+                ) : (
+                  <p className="text-sm text-slate-500">
+                    <Link to="/login" className="font-semibold text-amber-600 hover:text-amber-700 underline underline-offset-2">
+                      Log in
+                    </Link>
+                    {' '}to your account and request a new verification link from your dashboard.
+                  </p>
+                )}
+              </div>
 
               <Link
                 to="/login"
