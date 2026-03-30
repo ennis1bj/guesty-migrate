@@ -185,7 +185,7 @@ router.post('/:id/checkout', async (req, res) => {
     const migration = migResult.rows[0];
     const manifest = migration.manifest;
 
-    // Store selected listing IDs for pilot mode
+    // Store selected listing IDs for custom selection
     if (selectedListingIds && Array.isArray(selectedListingIds) && selectedListingIds.length > 0) {
       await pool.query(
         `UPDATE migrations SET selected_listing_ids = $1 WHERE id = $2`,

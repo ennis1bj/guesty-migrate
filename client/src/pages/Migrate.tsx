@@ -337,10 +337,8 @@ export default function Migrate() {
   const totalListings = manifest?.listings ?? 0;
   const isCustomSelection = selectedListingIds.length > 0 && selectedListingIds.length < allListingIds.length;
   const effectiveListingCount = isCustomSelection ? selectedListingIds.length : totalListings;
-  const isPilotPricing = isCustomSelection;
-
-  const flatCents = isPilotPricing ? getTierFlatCents(effectiveListingCount) : (pricing?.amountCents || 0);
-  const effectiveTier = isPilotPricing ? getTierLabel(effectiveListingCount) : (pricing?.tier || '');
+  const flatCents = isCustomSelection ? getTierFlatCents(effectiveListingCount) : (pricing?.amountCents || 0);
+  const effectiveTier = isCustomSelection ? getTierLabel(effectiveListingCount) : (pricing?.tier || '');
   const perListingCents = calculatePerListingCents(effectiveListingCount);
   const addonTotal = selectedAddOns.reduce((sum, key) => {
     const a = ADD_ONS.find((ao) => ao.key === key);
@@ -870,7 +868,7 @@ export default function Migrate() {
                   </div>
                 </div>
 
-                {isPilotPricing && (
+                {isCustomSelection && (
                   <div className="mb-6 flex items-center gap-2 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 font-medium">
                     <svg className="w-4 h-4 flex-shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -926,7 +924,7 @@ export default function Migrate() {
                 <p className="text-slate-500 mb-4 text-center">
                   Select a pricing mode and any optional add-ons for your migration.
                 </p>
-                {isPilotPricing && (
+                {isCustomSelection && (
                   <div className="mb-6 flex items-center gap-2 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 font-medium">
                     <svg className="w-4 h-4 flex-shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -959,7 +957,7 @@ export default function Migrate() {
                       <span className="font-bold text-slate-900">Flat Rate</span>
                     </div>
                     <p className="text-2xl font-extrabold text-slate-900 ml-7">{formatPrice(flatCents)}</p>
-                    <p className="text-sm text-slate-400 ml-7 capitalize">{effectiveTier} tier — {effectiveListingCount} {isPilotPricing ? 'selected ' : ''}listings</p>
+                    <p className="text-sm text-slate-400 ml-7 capitalize">{effectiveTier} tier — {effectiveListingCount} {isCustomSelection ? 'selected ' : ''}listings</p>
                   </button>
 
                   <button
@@ -1059,7 +1057,7 @@ export default function Migrate() {
                   <div className="space-y-1 text-sm">
                     <div className="flex justify-between">
                       <span className="text-slate-500">
-                        {pricingMode === 'flat_tier' ? `${effectiveTier} flat rate` : `Per-listing (${effectiveListingCount} ${isPilotPricing ? 'selected ' : ''}listings)`}
+                        {pricingMode === 'flat_tier' ? `${effectiveTier} flat rate` : `Per-listing (${effectiveListingCount} ${isCustomSelection ? 'selected ' : ''}listings)`}
                       </span>
                       <span className="font-medium text-slate-900">{formatPrice(baseCents)}</span>
                     </div>
