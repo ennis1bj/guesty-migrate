@@ -82,9 +82,15 @@ router.post('/preflight', async (req, res) => {
         listingDetails: allListings.map(l => ({ id: l._id, title: l.title || l.nickname || `Listing ${l._id}` })),
       };
     } catch (err) {
+      const details = err.response?.data?.message || err.message;
+      logger.warn('Preflight source credential failure', {
+        error: details,
+        status: err.response?.status,
+        userId: req.user.id,
+      });
       return res.status(400).json({
         error: 'Failed to connect to source Guesty account',
-        details: err.response?.data?.message || err.message,
+        details,
       });
     }
 
@@ -97,9 +103,15 @@ router.post('/preflight', async (req, res) => {
     try {
       await destClient.getAccessToken();
     } catch (err) {
+      const details = err.response?.data?.message || err.message;
+      logger.warn('Preflight destination credential failure', {
+        error: details,
+        status: err.response?.status,
+        userId: req.user.id,
+      });
       return res.status(400).json({
         error: 'Failed to connect to destination Guesty account',
-        details: err.response?.data?.message || err.message,
+        details,
       });
     }
 

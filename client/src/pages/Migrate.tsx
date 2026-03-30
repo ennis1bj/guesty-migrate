@@ -178,7 +178,10 @@ export default function Migrate() {
       }
       setCurrentStep(1);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to connect to Guesty accounts');
+      const errData = err.response?.data;
+      const headline = errData?.error || 'Failed to connect to Guesty accounts';
+      const detail = errData?.details;
+      setError(detail ? `${headline} — ${detail}` : headline);
     } finally {
       setLoading(false);
     }
