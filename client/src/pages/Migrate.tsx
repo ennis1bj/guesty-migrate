@@ -14,6 +14,11 @@ const STEPS = [
   { label: 'Progress', description: 'Migration' },
 ];
 
+interface ListingDetail {
+  id: string;
+  title?: string;
+}
+
 const ALL_CATEGORIES = ['custom_fields', 'rate_strategies', 'fees', 'taxes', 'listings', 'guests', 'owners', 'saved_replies', 'reservations', 'automations', 'tasks'];
 
 type PricingMode = 'flat_tier' | 'per_listing';
@@ -128,7 +133,7 @@ export default function Migrate() {
           setManifest(data.manifest);
           setPricing(data.pricing);
           if (data.manifest?.listingDetails) {
-            setAllListingIds(data.manifest.listingDetails.map((l: any) => l.id));
+            setAllListingIds((data.manifest.listingDetails as ListingDetail[]).map((l) => l.id));
           }
           setCurrentStep(1);
         })
@@ -198,7 +203,7 @@ export default function Migrate() {
       setPricing(data.pricing);
       // Store listing IDs for pilot mode
       if (data.manifest?.listingDetails) {
-        setAllListingIds(data.manifest.listingDetails.map((l: any) => l.id));
+        setAllListingIds((data.manifest.listingDetails as ListingDetail[]).map((l) => l.id));
       }
       setCurrentStep(1);
     } catch (err: any) {
@@ -570,7 +575,7 @@ export default function Migrate() {
                     </span>
                   </div>
                   <div className="max-h-60 overflow-y-auto border border-stone-100 rounded-lg">
-                    {(manifest as any).listingDetails?.map((listing: { id: string; title: string }) => (
+                    {((manifest as Record<string, unknown>).listingDetails as ListingDetail[] | undefined)?.map((listing) => (
                       <label
                         key={listing.id}
                         className="flex items-center gap-3 px-3 py-2 hover:bg-stone-50 cursor-pointer border-b border-stone-50 last:border-0"
