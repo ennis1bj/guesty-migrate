@@ -25,7 +25,7 @@ try {
 let redisAvailable = false;
 let reconnectTimer = null;
 let reconnectFailures = 0;
-const MAX_RECONNECT_FAILURES = 5; // stop loop after ~2.5 min of consecutive failures
+let reconnectIntervalMs = 30_000; // starts at 30 s, backs off exponentially
 
 function isRedisAvailable() {
   return redisAvailable;
@@ -137,12 +137,11 @@ function buildConnectionOptions(overrides = {}) {
   }
 
   // Retry strategy with exponential backoff (#76)
+  // Keep retrying indefinitely with increasing delays up to 30 s so that
+  // transient Redis drops (e.g. free-tier disconnects) recover automatically
+  // without needing a server restart.
   const retryStrategy = (times) => {
-    if (times > 10) {
-      logger.warn('Redis max reconnection attempts reached', { attempts: times });
-      return null; // stop retrying
-    }
-    const delay = Math.min(times * 200, 5000); // 200ms, 400ms, ... 5s cap
+    const delay = Math.min(Math.pow(2, times - 1) * 500, 30_000); // 500ms → 1s → 2s … 30s
     logger.info('Redis reconnecting', { attempt: times, delayMs: delay });
     return delay;
   };
@@ -254,48 +253,70 @@ async function validateRedisConnection() {
 // ── Periodic reconnection (#78) ────────────────────────────────────────────────
 
 /**
- * Start a 30-second interval that attempts to reconnect to Redis when it's
- * marked unavailable. Calls `onReconnect` when connectivity is restored.
+ * Schedule the next reconnection attempt using exponential backoff.
+ *
+ * The interval starts at 30 s and doubles on each consecutive failure up to a
+ * cap of 5 minutes.  On success the interval resets to 30 s.  The loop never
+ * stops permanently — free-tier Redis can be down for extended periods and the
+ * app must self-heal when it comes back.
  */
-function startReconnectLoop(onReconnect) {
-  if (reconnectTimer) return; // already running
+function scheduleNextReconnect(onReconnect) {
+  if (reconnectTimer) return; // already scheduled
 
-  reconnectFailures = 0; // reset counter each time the loop starts
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null; // allow next schedule
 
-  reconnectTimer = setInterval(async () => {
-    if (redisAvailable) return; // already connected, nothing to do
+    if (redisAvailable) {
+      // Already reconnected by some other path — reset backoff and stop.
+      reconnectIntervalMs = 30_000;
+      reconnectFailures = 0;
+      return;
+    }
 
-    logger.info('Attempting periodic Redis reconnection...');
+    logger.info('Attempting periodic Redis reconnection...', {
+      attempt: reconnectFailures + 1,
+      intervalMs: reconnectIntervalMs,
+    });
+
     const ok = await validateRedisConnection();
     if (ok) {
       reconnectFailures = 0;
+      reconnectIntervalMs = 30_000; // reset backoff on success
       logger.info('Redis is reachable again — attempting queue re-initialization');
       if (typeof onReconnect === 'function') {
         try {
           await onReconnect();
         } catch (err) {
           logger.error('Redis reconnect callback failed', { error: err.message });
+          // Even if re-init failed, keep trying
+          scheduleNextReconnect(onReconnect);
         }
       }
     } else {
       reconnectFailures += 1;
-      if (reconnectFailures >= MAX_RECONNECT_FAILURES) {
-        logger.warn(
-          `Redis unreachable after ${reconnectFailures} attempts — stopping reconnection loop. ` +
-          'App will continue in in-process mode. Fix REDIS_URL to re-enable queue.'
-        );
-        stopReconnectLoop();
-      }
+      // Exponential backoff: 30 s → 60 s → 120 s → … → 5 min cap
+      reconnectIntervalMs = Math.min(reconnectIntervalMs * 2, 5 * 60_000);
+      logger.warn('Redis still unreachable — will retry', {
+        attempt: reconnectFailures,
+        nextCheckMs: reconnectIntervalMs,
+      });
+      scheduleNextReconnect(onReconnect); // keep trying indefinitely
     }
-  }, 30_000);
+  }, reconnectIntervalMs);
 
   // Don't keep the process alive just for this timer
   if (reconnectTimer.unref) reconnectTimer.unref();
 }
 
+function startReconnectLoop(onReconnect) {
+  reconnectFailures = 0;
+  reconnectIntervalMs = 30_000;
+  scheduleNextReconnect(onReconnect);
+}
+
 function stopReconnectLoop() {
   if (reconnectTimer) {
-    clearInterval(reconnectTimer);
+    clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
 }

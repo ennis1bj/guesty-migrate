@@ -94,10 +94,51 @@ class GuestyClient {
   }
 
   async getAllPaginated(path, key) {
-    const items = [];
-    let skip = 0;
     const limit = 100;
 
+    // Fetch first page — it tells us both the first batch of results and,
+    // when the API includes a count/total, the total number of records so we
+    // can pre-compute all remaining page offsets and fetch them in parallel.
+    const firstData = await this.request('GET', `${path}?skip=0&limit=${limit}`);
+    const firstResults = firstData.results || firstData[key] || firstData;
+
+    if (!Array.isArray(firstResults) || firstResults.length === 0) return [];
+    if (firstResults.length < limit) return firstResults; // single-page result
+
+    const total =
+      typeof firstData.count === 'number' ? firstData.count :
+      typeof firstData.total === 'number' ? firstData.total :
+      null;
+
+    if (total !== null && total > limit) {
+      // Pre-compute all remaining page offsets then fetch in parallel batches
+      // of 5 to stay within Guesty's rate limits.
+      const offsets = [];
+      for (let skip = limit; skip < total; skip += limit) {
+        offsets.push(skip);
+      }
+
+      const CONCURRENCY = 5;
+      const remaining = [];
+      for (let i = 0; i < offsets.length; i += CONCURRENCY) {
+        const batch = offsets.slice(i, i + CONCURRENCY);
+        const pages = await Promise.all(
+          batch.map((skip) =>
+            this.request('GET', `${path}?skip=${skip}&limit=${limit}`)
+              .then((data) => data.results || data[key] || data)
+          )
+        );
+        for (const page of pages) {
+          if (Array.isArray(page)) remaining.push(...page);
+        }
+      }
+
+      return [...firstResults, ...remaining];
+    }
+
+    // No total count in the response — fall back to sequential pagination.
+    const items = [...firstResults];
+    let skip = limit;
     while (true) {
       const data = await this.request('GET', `${path}?skip=${skip}&limit=${limit}`);
       const results = data.results || data[key] || data;
@@ -106,7 +147,6 @@ class GuestyClient {
       if (results.length < limit) break;
       skip += limit;
     }
-
     return items;
   }
 
