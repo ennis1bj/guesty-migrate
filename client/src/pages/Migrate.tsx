@@ -616,7 +616,6 @@ export default function Migrate() {
           }
         };
         const sorted = [...filtered].sort(sortFn);
-        const mtlIdSet = new Set(allDetails.filter(l => l.type === 'MTL').map(l => l.id));
         const seenIds = new Set<string>();
         type Group = { parent: ListingDetail; rooms: ListingDetail[] };
         const groups: Group[] = [];
@@ -627,17 +626,6 @@ export default function Migrate() {
             groups.push({ parent: l, rooms });
             seenIds.add(l.id);
             rooms.forEach(r => seenIds.add(r.id));
-          }
-        }
-        for (const l of sorted) {
-          if (!seenIds.has(l.id) && l.complexId && mtlIdSet.has(l.complexId)) {
-            const parent = allDetails.find(p => p.id === l.complexId);
-            if (parent) {
-              const existingGroup = groups.find(g => g.parent.id === l.complexId);
-              if (existingGroup) existingGroup.rooms.push(l);
-              else groups.push({ parent, rooms: [l] });
-              seenIds.add(l.id);
-            }
           }
         }
         for (const l of sorted) {
