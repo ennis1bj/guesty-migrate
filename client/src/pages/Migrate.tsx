@@ -387,10 +387,20 @@ export default function Migrate() {
             </label>
           </div>
 
+          {loading && (
+            <div className="mt-6 flex items-center gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+              <div className="animate-spin w-5 h-5 border-2 border-amber-500 border-t-transparent rounded-full flex-shrink-0" />
+              <div>
+                <p className="text-sm font-semibold text-amber-900">Connecting to your Guesty accounts…</p>
+                <p className="text-xs text-amber-700 mt-0.5">Fetching account data — this can take up to 30 seconds.</p>
+              </div>
+            </div>
+          )}
+
           <button
             onClick={handlePreflight}
             disabled={loading || !sourceClientId || !sourceClientSecret || !destClientId || !destClientSecret || !channelConfirmed}
-            className="mt-6 bg-amber-500 hover:bg-amber-600 text-slate-900 px-8 py-3 rounded-xl font-semibold shadow-sm hover:shadow-md disabled:opacity-50 transition-all duration-200"
+            className="mt-4 bg-amber-500 hover:bg-amber-600 text-slate-900 px-8 py-3 rounded-xl font-semibold shadow-sm hover:shadow-md disabled:opacity-50 transition-all duration-200"
           >
             {loading ? 'Connecting...' : 'Connect & Analyze'}
           </button>
