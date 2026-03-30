@@ -679,7 +679,7 @@ export default function Migrate() {
         const summaryTier = getTierLabel(selectedListingIds.length);
         const summaryFlat = getTierFlatCents(selectedListingIds.length);
         const summaryPerListing = calculatePerListingCents(selectedListingIds.length);
-        const summaryRequiresQuote = selectedListingIds.length > 500;
+        const summaryRequiresQuote = selectedListingIds.length >= 500;
         const effectivePrice = Math.min(summaryFlat, summaryPerListing);
         const filtersActive = !!(q || filterStatus !== 'all' || filterType !== 'all' || filterCity);
         return (
@@ -844,7 +844,7 @@ export default function Migrate() {
       })()}
 
       {/* Step 3: Payment */}
-      {currentStep === 3 && pricing && (!pricing.requiresQuote || isBeta || isDemo) && manifest && (
+      {currentStep === 3 && pricing && (effectiveListingCount < 500 || isBeta || isDemo) && manifest && (
         <div className="bg-white rounded-2xl shadow-sm border border-stone-200 p-8">
           <div className="max-w-2xl mx-auto">
             <div className="w-16 h-16 bg-amber-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
@@ -875,7 +875,7 @@ export default function Migrate() {
                     <svg className="w-4 h-4 flex-shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    Pilot mode — migrating {effectiveListingCount} selected listing{effectiveListingCount === 1 ? '' : 's'}.
+                    Custom selection — migrating {effectiveListingCount} of {manifest.listings} listing{effectiveListingCount === 1 ? '' : 's'}.
                   </div>
                 )}
 
@@ -931,7 +931,7 @@ export default function Migrate() {
                     <svg className="w-4 h-4 flex-shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    Pilot mode — pricing is based on your {effectiveListingCount} selected listing{effectiveListingCount === 1 ? '' : 's'}, not the full account.
+                    Custom selection — pricing is based on your {effectiveListingCount} selected listing{effectiveListingCount === 1 ? '' : 's'}, not the full account.
                   </div>
                 )}
 
