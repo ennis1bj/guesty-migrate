@@ -42,20 +42,19 @@ router.post('/preflight', async (req, res) => {
     let manifest;
     try {
       await sourceClient.getAccessToken();
+      // Resolve account ID once (needed for the custom-fields path)
+      const accountId = await sourceClient.getAccountId();
 
       // Fetch full listings (needed for photo count) and counts for the rest
-      const [customFields, rateStrategies, fees, taxes, allListings, reservations, guests, owners, savedReplies, automations, tasks] = await Promise.all([
-        sourceClient.getCount('/custom-fields'),
-        sourceClient.getCount('/rate-strategies'),
-        sourceClient.getCount('/fees'),
-        sourceClient.getCount('/taxes'),
+      const [customFields, fees, allListings, reservations, guests, owners, savedReplies, tasks] = await Promise.all([
+        sourceClient.getCount(`/accounts/${accountId}/custom-fields`),
+        sourceClient.getCount('/additional-fees/account'),
         sourceClient.getAllListings(),
         sourceClient.getCount('/reservations'),
         sourceClient.getCount('/guests'),
         sourceClient.getCount('/owners'),
         sourceClient.getCount('/saved-replies'),
-        sourceClient.getCount('/automations'),
-        sourceClient.getCount('/tasks-open-api/tasks'),
+        sourceClient.getCount(`/tasks-open-api/tasks?columns=_id`),
       ]);
 
       // l.pictures is an array of picture objects, each with .original and/or
@@ -68,15 +67,12 @@ router.post('/preflight', async (req, res) => {
 
       manifest = {
         custom_fields: customFields,
-        rate_strategies: rateStrategies,
         fees,
-        taxes,
         listings: allListings.length,
         reservations,
         guests,
         owners,
         saved_replies: savedReplies,
-        automations,
         tasks,
         photos: photoCount,
         listingDetails: allListings.map(l => ({ id: l._id, title: l.title || l.nickname || `Listing ${l._id}` })),
@@ -195,7 +191,7 @@ router.post('/:id/checkout', async (req, res) => {
       await pool.query(
         `UPDATE migrations SET status = 'paid', selected_categories = $1, selected_addons = $2, pricing_mode = 'beta' WHERE id = $3`,
         [
-          selectedCategories || ['custom_fields', 'rate_strategies', 'fees', 'taxes', 'listings', 'guests', 'owners', 'saved_replies', 'reservations', 'automations', 'tasks'],
+          selectedCategories || ['custom_fields', 'fees', 'listings', 'guests', 'owners', 'saved_replies', 'reservations', 'tasks'],
           JSON.stringify(addOns || []),
           id,
         ]
@@ -276,7 +272,7 @@ router.post('/:id/checkout', async (req, res) => {
        WHERE id = $5`,
       [
         session.id,
-        selectedCategories || ['custom_fields', 'rate_strategies', 'fees', 'taxes', 'listings', 'guests', 'owners', 'saved_replies', 'reservations', 'automations', 'tasks'],
+        selectedCategories || ['custom_fields', 'fees', 'listings', 'guests', 'owners', 'saved_replies', 'reservations', 'tasks'],
         JSON.stringify(validAddOns),
         pricingMode,
         id,
@@ -465,7 +461,7 @@ router.post('/:id/demo-activate', async (req, res) => {
     await pool.query(
       "UPDATE migrations SET status = 'paid', selected_categories = $1, selected_listing_ids = $2 WHERE id = $3",
       [
-        selectedCategories || ['custom_fields', 'rate_strategies', 'fees', 'taxes', 'listings', 'guests', 'owners', 'saved_replies', 'reservations', 'automations', 'tasks'],
+        selectedCategories || ['custom_fields', 'fees', 'listings', 'guests', 'owners', 'saved_replies', 'reservations', 'tasks'],
         selectedListingIds ? JSON.stringify(selectedListingIds) : null,
         id,
       ]

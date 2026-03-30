@@ -8,8 +8,6 @@ const DEMO_CATEGORIES = [
   { key: 'photos',         label: 'Photos',          count: 1842 },
   { key: 'guests',         label: 'Guests',          count: 312 },
   { key: 'reservations',   label: 'Reservations',    count: 486 },
-  { key: 'rate_strategies',label: 'Rate Strategies', count: 14  },
-  { key: 'automations',    label: 'Automations',     count: 22  },
   { key: 'tasks',          label: 'Tasks',            count: 8   },
   { key: 'saved_replies',  label: 'Saved Replies',   count: 31  },
   { key: 'custom_fields',  label: 'Custom Fields',   count: 6   },
@@ -19,13 +17,13 @@ const DEMO_CATEGORIES = [
 
 const DEMO_PROGRESS = [
   { label: 'Custom Fields',   pct: 100, status: 'complete' },
-  { label: 'Rate Strategies', pct: 100, status: 'complete' },
+  { label: 'Fees',            pct: 100, status: 'complete' },
   { label: 'Listings',        pct: 100, status: 'complete' },
   { label: 'Photos',          pct: 68,  status: 'running'  },
   { label: 'Guests',          pct: 100, status: 'complete' },
   { label: 'Reservations',    pct: 41,  status: 'running'  },
-  { label: 'Automations',     pct: 0,   status: 'pending'  },
   { label: 'Saved Replies',   pct: 0,   status: 'pending'  },
+  { label: 'Tasks',           pct: 0,   status: 'pending'  },
 ];
 
 function StepIndicator({ currentStep }: { currentStep: number }) {

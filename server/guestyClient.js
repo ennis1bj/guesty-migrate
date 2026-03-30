@@ -36,6 +36,9 @@ class Semaphore {
   }
 }
 
+// Columns required by the tasks endpoint (columns param is mandatory)
+const TASK_COLUMNS = '_id title description status listingId dueDate type priority notes plannedStartDate plannedEndDate parentTaskId';
+
 class GuestyClient {
   constructor({ clientId, clientSecret }) {
     this.clientId = clientId;
@@ -45,6 +48,16 @@ class GuestyClient {
     // when multiple operations (preflight counts, parallel page fetches, etc.)
     // are in-flight simultaneously.
     this.semaphore = new Semaphore(5);
+    // Cached account ID — resolved lazily via getAccountId()
+    this._accountId = null;
+  }
+
+  async getAccountId() {
+    if (this._accountId) return this._accountId;
+    const data = await this.request('GET', '/accounts/me');
+    this._accountId = data._id;
+    if (!this._accountId) throw new Error('GET /accounts/me did not return an _id');
+    return this._accountId;
   }
 
   async getAccessToken() {
@@ -139,11 +152,13 @@ class GuestyClient {
 
   async getAllPaginated(path, key) {
     const limit = 100;
+    // If path already contains query params (e.g. ?columns=...), append with &
+    const sep = path.includes('?') ? '&' : '?';
 
     // Fetch first page — it tells us both the first batch of results and,
     // when the API includes a count/total, the total number of records so we
     // can pre-compute all remaining page offsets and fetch them in parallel.
-    const firstData = await this.request('GET', `${path}?skip=0&limit=${limit}`);
+    const firstData = await this.request('GET', `${path}${sep}skip=0&limit=${limit}`);
     const firstResults = firstData.results || firstData[key] || firstData;
 
     if (!Array.isArray(firstResults) || firstResults.length === 0) return [];
@@ -168,7 +183,7 @@ class GuestyClient {
         const batch = offsets.slice(i, i + CONCURRENCY);
         const pages = await Promise.all(
           batch.map((skip) =>
-            this.request('GET', `${path}?skip=${skip}&limit=${limit}`)
+            this.request('GET', `${path}${sep}skip=${skip}&limit=${limit}`)
               .then((data) => data.results || data[key] || data)
           )
         );
@@ -184,7 +199,7 @@ class GuestyClient {
     const items = [...firstResults];
     let skip = limit;
     while (true) {
-      const data = await this.request('GET', `${path}?skip=${skip}&limit=${limit}`);
+      const data = await this.request('GET', `${path}${sep}skip=${skip}&limit=${limit}`);
       const results = data.results || data[key] || data;
       if (!Array.isArray(results) || results.length === 0) break;
       items.push(...results);
@@ -195,35 +210,21 @@ class GuestyClient {
   }
 
   async getAllCustomFields() {
-    return this.getAllPaginated('/custom-fields', 'results');
+    const id = await this.getAccountId();
+    return this.getAllPaginated(`/accounts/${id}/custom-fields`, 'results');
   }
 
   async createCustomField(data) {
-    return this.request('POST', '/custom-fields', data);
+    const id = await this.getAccountId();
+    return this.request('POST', `/accounts/${id}/custom-fields`, data);
   }
 
   async getAllFees() {
-    return this.getAllPaginated('/fees', 'results');
+    return this.getAllPaginated('/additional-fees/account', 'results');
   }
 
   async createFee(data) {
-    return this.request('POST', '/fees', data);
-  }
-
-  async getAllTaxes() {
-    return this.getAllPaginated('/taxes', 'results');
-  }
-
-  async createTax(data) {
-    return this.request('POST', '/taxes', data);
-  }
-
-  async getAllRateStrategies() {
-    return this.getAllPaginated('/rate-strategies', 'results');
-  }
-
-  async createRateStrategy(data) {
-    return this.request('POST', '/rate-strategies', data);
+    return this.request('POST', '/additional-fees/account', data);
   }
 
   async getAllSavedReplies() {
@@ -250,17 +251,17 @@ class GuestyClient {
     return this.getAllPaginated('/owners', 'results');
   }
 
-  async getAllAutomations() {
-    return this.getAllPaginated('/automations', 'results');
-  }
-
   async getAllTasks() {
-    return this.getAllPaginated('/tasks-open-api/tasks', 'results');
+    return this.getAllPaginated(
+      `/tasks-open-api/tasks?columns=${encodeURIComponent(TASK_COLUMNS)}`,
+      'results'
+    );
   }
 
   async getCount(path) {
     try {
-      const data = await this.request('GET', `${path}?skip=0&limit=1`);
+      const sep = path.includes('?') ? '&' : '?';
+      const data = await this.request('GET', `${path}${sep}skip=0&limit=1`);
       if (typeof data.count === 'number') return data.count;
       if (typeof data.total === 'number') return data.total;
       // Fallback: paginate all and count
@@ -317,10 +318,6 @@ class GuestyClient {
 
   async createOwner(data) {
     return this.request('POST', '/owners', data);
-  }
-
-  async createAutomation(data) {
-    return this.request('POST', '/automations', data);
   }
 
   async createTask(data) {

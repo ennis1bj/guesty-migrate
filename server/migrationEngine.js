@@ -10,19 +10,26 @@ function extractPhotoUrl(pic) {
 
 function getCategoryPath(category) {
   const paths = {
-    custom_fields:   '/custom-fields',
-    rate_strategies: '/rate-strategies',
-    fees:            '/fees',
-    taxes:           '/taxes',
-    listings:        '/listings',
-    guests:          '/guests',
-    owners:          '/owners',
-    saved_replies:   '/saved-replies',
-    reservations:    '/reservations',
-    automations:     '/automations',
-    tasks:           '/tasks-open-api/tasks',
+    listings:      '/listings',
+    guests:        '/guests',
+    owners:        '/owners',
+    saved_replies: '/saved-replies',
+    reservations:  '/reservations',
+    tasks:         '/tasks-open-api/tasks?columns=_id',
   };
   return paths[category] || `/${category}`;
+}
+
+// Returns the correct count for a category, resolving account-ID-dependent
+// or param-required paths that cannot be expressed as a plain static path.
+async function getCountForClient(client, category) {
+  if (category === 'custom_fields') {
+    const id = await client.getAccountId();
+    return client.getCount(`/accounts/${id}/custom-fields`);
+  }
+  if (category === 'fees') return client.getCount('/additional-fees/account');
+  if (category === 'tasks') return client.getCount('/tasks-open-api/tasks?columns=_id');
+  return client.getCount(getCategoryPath(category));
 }
 
 const SOURCE_ONLY_FIELDS = new Set([
@@ -93,29 +100,9 @@ const CATEGORIES = {
     create: (client, data) => client.createCustomField(data),
     idField: '_id',
   },
-  rate_strategies: {
-    getAll: (client) => client.getAllRateStrategies(),
-    create: (client, data) => client.createRateStrategy(data),
-    idField: '_id',
-    transform: (item, maps) => {
-      const cleaned = stripFieldsDeep(item);
-      if (Array.isArray(cleaned.listingIds) && maps.listings) {
-        cleaned.listingIds = cleaned.listingIds.map(id => maps.listings[id] || id);
-      }
-      if (cleaned.listingId && maps.listings) {
-        cleaned.listingId = maps.listings[cleaned.listingId] || cleaned.listingId;
-      }
-      return cleaned;
-    },
-  },
   fees: {
     getAll: (client) => client.getAllFees(),
     create: (client, data) => client.createFee(data),
-    idField: '_id',
-  },
-  taxes: {
-    getAll: (client) => client.getAllTaxes(),
-    create: (client, data) => client.createTax(data),
     idField: '_id',
   },
   listings: {
@@ -181,34 +168,6 @@ const CATEGORIES = {
       return cleaned;
     },
   },
-  automations: {
-    getAll: (client) => client.getAllAutomations(),
-    create: (client, data) => client.createAutomation(data),
-    idField: '_id',
-    transform: (item, maps) => {
-      const cleaned = stripFieldsDeep(item);
-      // Remap top-level listingId
-      if (cleaned.listingId && maps.listings) {
-        cleaned.listingId = maps.listings[cleaned.listingId] || cleaned.listingId;
-      }
-      // Remap listingIds array if present
-      if (Array.isArray(cleaned.listingIds) && maps.listings) {
-        cleaned.listingIds = cleaned.listingIds.map(
-          id => maps.listings[id] || id
-        );
-      }
-      // Remap conditions array entries that reference listingId
-      if (Array.isArray(cleaned.conditions)) {
-        cleaned.conditions = cleaned.conditions.map(cond => {
-          if (cond.listingId && maps.listings) {
-            return { ...cond, listingId: maps.listings[cond.listingId] || cond.listingId };
-          }
-          return cond;
-        });
-      }
-      return cleaned;
-    },
-  },
   saved_replies: {
     getAll: (client) => client.getAllSavedReplies(),
     create: (client, data) => client.createSavedReply(data),
@@ -255,15 +214,12 @@ const CATEGORIES = {
 // Strict migration order for dependency resolution
 const MIGRATION_ORDER = [
   'custom_fields',
-  'rate_strategies',
   'fees',
-  'taxes',
   'listings',
   'guests',
   'owners',
   'saved_replies',
   'reservations',
-  'automations',
   'tasks',
 ];
 
@@ -392,7 +348,7 @@ async function runMigration(migrationId) {
       }
 
       // Pilot mode: scope dependent categories to migrated listings
-      const LISTING_DEPENDENT_CATEGORIES = ['reservations', 'automations', 'tasks', 'saved_replies'];
+      const LISTING_DEPENDENT_CATEGORIES = ['reservations', 'tasks', 'saved_replies'];
       if (LISTING_DEPENDENT_CATEGORIES.includes(category) && migration.selected_listing_ids && idMaps.listings) {
         const migratedListingIds = new Set(Object.keys(idMaps.listings));
         sourceItems = sourceItems.filter(item => {
@@ -547,11 +503,9 @@ async function runMigration(migrationId) {
     if (!categoryDef) continue;
 
     try {
-      const sourcePath = getCategoryPath(category);
-      const destPath   = getCategoryPath(category);
       const [sourceCount, destCount] = await Promise.all([
-        sourceClient.getCount(sourcePath),
-        destClient.getCount(destPath),
+        getCountForClient(sourceClient, category),
+        getCountForClient(destClient, category),
       ]);
       diffReport[category] = {
         source: sourceCount,

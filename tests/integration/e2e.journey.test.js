@@ -270,14 +270,13 @@ jest.mock('../../server/guestyClient', () => {
   let _c = 0;
   const mk = () => ({
     getAccessToken:         jest.fn().mockResolvedValue('mock-token'),
+    getAccountId:           jest.fn().mockResolvedValue('mock-account-id'),
     getAllListings:          jest.fn().mockResolvedValue([
       { _id: 'src-l1', title: 'Beach House',    pictures: ['https://ex.com/p1.jpg'], integrations: [] },
       { _id: 'src-l2', title: 'Mountain Cabin', pictures: ['https://ex.com/p2.jpg'], integrations: [] },
     ]),
     getAllCustomFields:      jest.fn().mockResolvedValue([{ _id: 'src-cf1', name: 'Pets' }]),
     getAllFees:              jest.fn().mockResolvedValue([{ _id: 'src-fee1', name: 'Cleaning', amount: 75 }]),
-    getAllTaxes:             jest.fn().mockResolvedValue([{ _id: 'src-tax1', name: 'City Tax', percent: 8 }]),
-    getAllRateStrategies:    jest.fn().mockResolvedValue([]),
     getAllGuests:            jest.fn().mockResolvedValue([
       { _id: 'src-g1', email: 'guest@ex.com', firstName: 'Jane', lastName: 'Smith' },
     ]),
@@ -286,27 +285,23 @@ jest.mock('../../server/guestyClient', () => {
       { _id: 'src-r1', listingId: 'src-l1', guestId: 'src-g1', source: {} },
     ]),
     getAllSavedReplies:      jest.fn().mockResolvedValue([]),
-    getAllAutomations:       jest.fn().mockResolvedValue([]),
     getAllTasks:             jest.fn().mockResolvedValue([]),
     getCount:               jest.fn().mockImplementation(async (path) => {
-      if (path.includes('listings'))      return 2;
-      if (path.includes('custom-fields')) return 1;
-      if (path.includes('fees'))          return 1;
-      if (path.includes('taxes'))         return 1;
-      if (path.includes('guests'))        return 1;
-      if (path.includes('reservations'))  return 1;
+      if (path.includes('listings'))       return 2;
+      if (path.includes('custom-fields'))  return 1;
+      if (path.includes('additional-fees'))return 1;
+      if (path.includes('guests'))         return 1;
+      if (path.includes('reservations'))   return 1;
+      if (path.includes('tasks'))          return 0;
       return 0;
     }),
     createCustomField:   jest.fn().mockImplementation(async () => ({ _id: `d-cf-${++_c}` })),
     createFee:           jest.fn().mockImplementation(async () => ({ _id: `d-fee-${++_c}` })),
-    createTax:           jest.fn().mockImplementation(async () => ({ _id: `d-tax-${++_c}` })),
-    createRateStrategy:  jest.fn().mockImplementation(async () => ({ _id: `d-rs-${++_c}` })),
     createListing:       jest.fn().mockImplementation(async () => ({ _id: `d-l-${++_c}` })),
     createGuest:         jest.fn().mockImplementation(async () => ({ _id: `d-g-${++_c}` })),
     createOwner:         jest.fn().mockImplementation(async () => ({ _id: `d-o-${++_c}` })),
     createReservation:   jest.fn().mockImplementation(async () => ({ _id: `d-r-${++_c}` })),
     createSavedReply:    jest.fn().mockImplementation(async () => ({ _id: `d-rep-${++_c}` })),
-    createAutomation:    jest.fn().mockImplementation(async () => ({ _id: `d-auto-${++_c}` })),
     createTask:          jest.fn().mockImplementation(async () => ({ _id: `d-task-${++_c}` })),
     uploadListingPhoto:  jest.fn().mockResolvedValue({ id: 'photo-ok' }),
     getListingCalendarBlocks: jest.fn().mockResolvedValue([]),
@@ -397,12 +392,11 @@ describe('E2E: Full user migration journey', () => {
     expect(res.body.migrationId).toBeDefined();
 
     // Manifest should reflect the mocked GuestyClient data
-    await checkShape('POST /api/migrations/preflight body.manifest', res.body.manifest ?? {}, { listings: 2, custom_fields: 1, fees: 1, taxes: 1, guests: 1 });
+    await checkShape('POST /api/migrations/preflight body.manifest', res.body.manifest ?? {}, { listings: 2, custom_fields: 1, fees: 1, guests: 1 });
     expect(res.body.manifest).toMatchObject({
       listings:      2,
       custom_fields: 1,
       fees:          1,
-      taxes:         1,
       guests:        1,
     });
 
@@ -422,7 +416,7 @@ describe('E2E: Full user migration journey', () => {
       await request(app)
         .post(`/api/migrations/${migrationId}/demo-activate`)
         .set('Authorization', `Bearer ${authToken}`)
-        .send({ selectedCategories: ['custom_fields', 'fees', 'taxes', 'listings', 'guests', 'reservations'] }),
+        .send({ selectedCategories: ['custom_fields', 'fees', 'listings', 'guests', 'reservations'] }),
       200,
     );
 

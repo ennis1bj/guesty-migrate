@@ -19,7 +19,7 @@ interface ListingDetail {
   title?: string;
 }
 
-const ALL_CATEGORIES = ['custom_fields', 'rate_strategies', 'fees', 'taxes', 'listings', 'guests', 'owners', 'saved_replies', 'reservations', 'automations', 'tasks'];
+const ALL_CATEGORIES = ['custom_fields', 'fees', 'listings', 'guests', 'owners', 'saved_replies', 'reservations', 'tasks'];
 
 type PricingMode = 'flat_tier' | 'per_listing';
 type AddOnKey = 'priority' | 'support' | 'remigrate' | 'verify';
@@ -560,7 +560,7 @@ export default function Migrate() {
               {pilotMode && (
                 <div>
                   <p className="text-sm text-slate-500 mb-3">
-                    Select specific listings to migrate. Dependent items (reservations, automations, tasks, saved replies) will be scoped to these listings only.
+                    Select specific listings to migrate. Dependent items (reservations, tasks, saved replies) will be scoped to these listings only.
                   </p>
                   <div className="flex items-center gap-2 mb-3">
                     <button
@@ -806,9 +806,9 @@ export default function Migrate() {
               <h3 className="text-sm font-bold text-slate-700 mb-2">What's included</h3>
               <ul className="text-sm text-slate-500 space-y-1">
                 <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Listings (including complex/MTL hierarchies), guests, owners, reservations (direct only)</li>
-                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Rate strategies and saved replies</li>
-                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Automations and tasks</li>
-                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Custom fields, fees, and taxes</li>
+                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Saved replies with listing ID remapping</li>
+                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Tasks with listing and assignee remapping</li>
+                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Custom fields and account-level fees</li>
                 <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Native listing photos and calendar blocks</li>
                 <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Verification report emailed on completion</li>
               </ul>

@@ -28,7 +28,7 @@ const PENDING_MIGRATION = {
   id: MIGRATION_ID,
   user_id: USER.id,
   status: 'pending',
-  manifest: { listings: 5, custom_fields: 2, fees: 1, taxes: 1, reservations: 10, guests: 8, owners: 2, automations: 3, tasks: 0, photos: 20 },
+  manifest: { listings: 5, custom_fields: 2, fees: 1, reservations: 10, guests: 8, owners: 2, tasks: 0, photos: 20 },
   selected_categories: null,
   selected_addons: [],
   pricing_mode: 'flat_tier',

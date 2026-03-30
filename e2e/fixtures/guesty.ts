@@ -6,9 +6,10 @@
  * 1. Playwright test fixture (exported `test`) — extends base test with a
  *    `guestyRoutes` fixture that applies page.route() handlers for:
  *    a) All Guesty Open API endpoint families at open-api.guesty.com
- *       (oauth2/token, /v1/listings, /v1/custom-fields, /v1/fees, /v1/taxes,
- *       /v1/rate-strategies, /v1/guests, /v1/owners, /v1/saved-replies,
- *       /v1/reservations, /v1/automations, /v1/tasks-open-api/tasks)
+ *       (oauth2/token, /v1/listings, /v1/accounts/me,
+ *       /v1/accounts/{id}/custom-fields, /v1/additional-fees/account,
+ *       /v1/guests, /v1/owners, /v1/saved-replies,
+ *       /v1/reservations, /v1/tasks-open-api/tasks)
  *    b) The backend /api/* endpoints that aggregate and return Guesty data,
  *       so the browser journey is fully deterministic with no real backend or
  *       Guesty credentials required.
@@ -55,13 +56,10 @@ export const API_RESPONSES = {
       listings: GUESTY_RESPONSES.listings.count,
       custom_fields: GUESTY_RESPONSES.customFields.count,
       fees: GUESTY_RESPONSES.fees.count,
-      taxes: GUESTY_RESPONSES.taxes.count,
       guests: GUESTY_RESPONSES.guests.count,
       owners: GUESTY_RESPONSES.owners.count,
       saved_replies: GUESTY_RESPONSES.savedReplies.count,
-      rate_strategies: GUESTY_RESPONSES.rateStrategies.count,
       reservations: GUESTY_RESPONSES.reservations.count,
-      automations: GUESTY_RESPONSES.automations.count,
       tasks: GUESTY_RESPONSES.tasks.count,
       photos: 4,
     },
@@ -80,7 +78,6 @@ export const API_RESPONSES = {
       { category: 'listings',      status: 'done', source_count: 2,  migrated_count: 2  },
       { category: 'custom_fields', status: 'done', source_count: 2,  migrated_count: 2  },
       { category: 'fees',          status: 'done', source_count: 2,  migrated_count: 2  },
-      { category: 'taxes',         status: 'done', source_count: 1,  migrated_count: 1  },
       { category: 'guests',        status: 'done', source_count: 3,  migrated_count: 3  },
       { category: 'reservations',  status: 'done', source_count: 4,  migrated_count: 4  },
     ],
@@ -101,15 +98,13 @@ export const test = base.extend<GuestyFixtures>({
     await context.route('**/v1/listings',  (r) => r.fulfill({ json: gr.listings }));
     await context.route('**/v1/listings/*/custom-fields', (r) => r.fulfill({ json: gr.listingCustomFields }));
     await context.route('**/v1/listings/*/calendar/block', (r) => r.fulfill({ json: { success: true } }));
-    await context.route('**/v1/custom-fields',       (r) => r.fulfill({ json: gr.customFields }));
-    await context.route('**/v1/rate-strategies',     (r) => r.fulfill({ json: gr.rateStrategies }));
-    await context.route('**/v1/fees',                (r) => r.fulfill({ json: gr.fees }));
-    await context.route('**/v1/taxes',               (r) => r.fulfill({ json: gr.taxes }));
+    await context.route('**/v1/accounts/me',                     (r) => r.fulfill({ json: { _id: 'mock-acct-id' } }));
+    await context.route('**/v1/accounts/*/custom-fields',        (r) => r.fulfill({ json: gr.customFields }));
+    await context.route('**/v1/additional-fees/account',         (r) => r.fulfill({ json: gr.fees }));
     await context.route('**/v1/guests',              (r) => r.fulfill({ json: gr.guests }));
     await context.route('**/v1/owners',              (r) => r.fulfill({ json: gr.owners }));
     await context.route('**/v1/saved-replies',       (r) => r.fulfill({ json: gr.savedReplies }));
     await context.route('**/v1/reservations',        (r) => r.fulfill({ json: gr.reservations }));
-    await context.route('**/v1/automations',         (r) => r.fulfill({ json: gr.automations }));
     await context.route('**/v1/tasks-open-api/tasks',(r) => r.fulfill({ json: gr.tasks }));
 
     // ── (b) Backend /api/* endpoints — deterministic Guesty-aggregated responses ─
@@ -244,16 +239,15 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse) {
   if (method === 'GET'  && path === '/v1/listings')                                        return jsonReply(res, 200, gr.listings);
   if (method === 'GET'  && /^\/v1\/listings\/[^/]+\/custom-fields$/.test(path))            return jsonReply(res, 200, gr.listingCustomFields);
   if (method === 'POST' && /^\/v1\/listings\/[^/]+\/calendar\/block$/.test(path))          return jsonReply(res, 200, { success: true });
-  if (method === 'GET'  && path === '/v1/custom-fields')                                   return jsonReply(res, 200, gr.customFields);
-  if (method === 'GET'  && path === '/v1/rate-strategies')                                 return jsonReply(res, 200, gr.rateStrategies);
-  if (method === 'GET'  && path === '/v1/fees')                                            return jsonReply(res, 200, gr.fees);
-  if (method === 'GET'  && path === '/v1/taxes')                                           return jsonReply(res, 200, gr.taxes);
+  if (method === 'GET'  && path === '/v1/accounts/me')                                     return jsonReply(res, 200, { _id: 'mock-acct-id' });
+  if (method === 'GET'  && /^\/v1\/accounts\/[^/]+\/custom-fields/.test(path))             return jsonReply(res, 200, gr.customFields);
+  if (method === 'POST' && /^\/v1\/accounts\/[^/]+\/custom-fields/.test(path))             return jsonReply(res, 201, { _id: `created-${++_idSeq}` });
+  if (method === 'GET'  && path.startsWith('/v1/additional-fees/account'))                 return jsonReply(res, 200, gr.fees);
   if (method === 'GET'  && path === '/v1/guests')                                          return jsonReply(res, 200, gr.guests);
   if (method === 'GET'  && path === '/v1/owners')                                          return jsonReply(res, 200, gr.owners);
   if (method === 'GET'  && path === '/v1/saved-replies')                                   return jsonReply(res, 200, gr.savedReplies);
   if (method === 'GET'  && path === '/v1/reservations')                                    return jsonReply(res, 200, gr.reservations);
-  if (method === 'GET'  && path === '/v1/automations')                                     return jsonReply(res, 200, gr.automations);
-  if (method === 'GET'  && path === '/v1/tasks-open-api/tasks')                            return jsonReply(res, 200, gr.tasks);
+  if (method === 'GET'  && path.startsWith('/v1/tasks-open-api/tasks'))                    return jsonReply(res, 200, gr.tasks);
   if (method === 'POST')                                                                   return jsonReply(res, 201, { _id: `created-${++_idSeq}` });
   if (method === 'PUT' || method === 'PATCH')                                              return jsonReply(res, 200, { updated: true });
   jsonReply(res, 404, { error: `Guesty mock: no handler for ${method} ${path}` });
