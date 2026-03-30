@@ -78,21 +78,34 @@ class GuestyClient {
       // Cache lookup failed — continue to fetch a fresh token
     }
 
-    // Fetch new token
+    // Fetch new token — retry up to 3 times on 429 (token endpoint has its
+    // own rate limit separate from the API rate limit).
     let response;
-    try {
-      response = await axios.post(AUTH_URL, new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: this.clientId,
-        client_secret: this.clientSecret,
-      }), {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        timeout: 15000,
-      });
-    } catch (authErr) {
-      const status = authErr.response?.status;
-      const msg = authErr.response?.data?.error || authErr.message;
-      throw new Error(`Guesty OAuth token request failed (${status || 'network error'}): ${msg}`);
+    const maxTokenRetries = 3;
+    for (let attempt = 0; attempt <= maxTokenRetries; attempt++) {
+      try {
+        response = await axios.post(AUTH_URL, new URLSearchParams({
+          grant_type: 'client_credentials',
+          client_id: this.clientId,
+          client_secret: this.clientSecret,
+        }), {
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          timeout: 15000,
+        });
+        break; // success — exit retry loop
+      } catch (authErr) {
+        const status = authErr.response?.status;
+        const rawMsg = authErr.response?.data?.error ?? authErr.response?.data ?? authErr.message;
+        const msg = typeof rawMsg === 'object' ? JSON.stringify(rawMsg) : String(rawMsg);
+
+        if (status === 429 && attempt < maxTokenRetries) {
+          const retryAfter = parseInt(authErr.response?.headers?.['retry-after'] || '5', 10);
+          const waitMs = retryAfter * 1000 * (attempt + 1); // escalate each attempt
+          await new Promise((r) => setTimeout(r, waitMs));
+          continue;
+        }
+        throw new Error(`Guesty OAuth token request failed (${status || 'network error'}): ${msg}`);
+      }
     }
 
     const { access_token, expires_in } = response.data;

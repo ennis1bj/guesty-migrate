@@ -628,15 +628,22 @@ async function runMigration(migrationId) {
             }
           }
           failedCount++;
+          const rawErrMsg = err.response?.data?.message ?? err.response?.data ?? err.message;
           errors.push({
             sourceId: item[categoryDef.idField],
-            error: err.response?.data?.message || err.message,
+            error: typeof rawErrMsg === 'object' ? JSON.stringify(rawErrMsg) : String(rawErrMsg),
+            status: err.response?.status,
           });
         }
       }
 
       idMaps[category] = idMap;
-      results[category] = { sourceCount, migratedCount, failedCount };
+      results[category] = {
+        sourceCount,
+        migratedCount,
+        failedCount,
+        ...(errors.length > 0 ? { errors: errors.slice(0, 20) } : {}),
+      };
 
       if (failedCount > 0) hasFailures = true;
 
