@@ -85,6 +85,28 @@ function calculatePerListingCents(listingCount: number): number {
   return total;
 }
 
+const FLAT_TIERS = [
+  { maxListings: 50,  amountCents: 34900, label: 'growth' },
+  { maxListings: 150, amountCents: 69900, label: 'professional' },
+  { maxListings: 300, amountCents: 99900, label: 'business' },
+  { maxListings: 500, amountCents: 149900, label: 'enterprise' },
+];
+
+function getTierFlatCents(count: number): number {
+  for (const t of FLAT_TIERS) {
+    if (count <= t.maxListings) return t.amountCents;
+  }
+  return 0;
+}
+
+function getTierLabel(count: number): string {
+  if (count <= 10) return 'per_listing';
+  for (const t of FLAT_TIERS) {
+    if (count <= t.maxListings) return t.label;
+  }
+  return 'enterprise_plus';
+}
+
 export default function Migrate() {
   const { user } = useAuth();
   const isDemo = !!user?.is_demo;
@@ -302,8 +324,14 @@ export default function Migrate() {
 
   const formatPrice = (cents: number) => `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 
-  const flatCents = pricing?.amountCents || 0;
-  const perListingCents = manifest ? calculatePerListingCents(manifest.listings ?? 0) : 0;
+  const effectiveListingCount = pilotMode && selectedListingIds.length > 0
+    ? selectedListingIds.length
+    : (manifest?.listings ?? 0);
+  const isPilotPricing = pilotMode && selectedListingIds.length > 0;
+
+  const flatCents = isPilotPricing ? getTierFlatCents(effectiveListingCount) : (pricing?.amountCents || 0);
+  const effectiveTier = isPilotPricing ? getTierLabel(effectiveListingCount) : (pricing?.tier || '');
+  const perListingCents = calculatePerListingCents(effectiveListingCount);
   const addonTotal = selectedAddOns.reduce((sum, key) => {
     const a = ADD_ONS.find((ao) => ao.key === key);
     return sum + (a?.priceCents || 0);
@@ -714,7 +742,7 @@ export default function Migrate() {
               ) : (
                 <>
                   <p className="text-3xl font-extrabold text-slate-900">from {formatPrice(Math.min(flatCents, perListingCents))}</p>
-                  <p className="text-sm text-slate-400 capitalize">{pricing.tier} tier</p>
+                  <p className="text-sm text-slate-400 capitalize">{effectiveTier} tier{isPilotPricing ? ` · ${effectiveListingCount} pilot listings` : ''}</p>
                 </>
               )}
             </div>
@@ -748,9 +776,17 @@ export default function Migrate() {
               </svg>
             </div>
             <h2 className="text-xl font-bold text-slate-900 mb-2 text-center">Choose Your Pricing</h2>
-            <p className="text-slate-500 mb-8 text-center">
+            <p className="text-slate-500 mb-4 text-center">
               Select a pricing mode and any optional add-ons for your migration.
             </p>
+            {isPilotPricing && (
+              <div className="mb-6 flex items-center gap-2 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 font-medium">
+                <svg className="w-4 h-4 flex-shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Pilot mode — pricing is based on your {effectiveListingCount} selected listing{effectiveListingCount === 1 ? '' : 's'}, not the full account.
+              </div>
+            )}
 
             {/* Pricing Mode Toggle */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
@@ -776,7 +812,7 @@ export default function Migrate() {
                   <span className="font-bold text-slate-900">Flat Rate</span>
                 </div>
                 <p className="text-2xl font-extrabold text-slate-900 ml-7">{formatPrice(flatCents)}</p>
-                <p className="text-sm text-slate-400 ml-7 capitalize">{pricing.tier} tier — {manifest.listings} listings</p>
+                <p className="text-sm text-slate-400 ml-7 capitalize">{effectiveTier} tier — {effectiveListingCount} {isPilotPricing ? 'pilot ' : ''}listings</p>
               </button>
 
               <button
@@ -812,22 +848,22 @@ export default function Migrate() {
                 <table className="w-full text-left">
                   <tbody className="text-slate-600">
                     <tr><td className="py-0.5">Base fee</td><td className="text-right font-medium">$79.00</td></tr>
-                    {(manifest.listings ?? 0) > 0 && (
+                    {effectiveListingCount > 0 && (
                       <tr>
-                        <td className="py-0.5">Listings 1–{Math.min(manifest.listings ?? 0, 50)} @ $8.00</td>
-                        <td className="text-right font-medium">${(Math.min(manifest.listings ?? 0, 50) * 8).toFixed(2)}</td>
+                        <td className="py-0.5">Listings 1–{Math.min(effectiveListingCount, 50)} @ $8.00</td>
+                        <td className="text-right font-medium">${(Math.min(effectiveListingCount, 50) * 8).toFixed(2)}</td>
                       </tr>
                     )}
-                    {(manifest.listings ?? 0) > 50 && (
+                    {effectiveListingCount > 50 && (
                       <tr>
-                        <td className="py-0.5">Listings 51–{Math.min(manifest.listings ?? 0, 200)} @ $5.00</td>
-                        <td className="text-right font-medium">${(Math.min(Math.max((manifest.listings ?? 0) - 50, 0), 150) * 5).toFixed(2)}</td>
+                        <td className="py-0.5">Listings 51–{Math.min(effectiveListingCount, 200)} @ $5.00</td>
+                        <td className="text-right font-medium">${(Math.min(Math.max(effectiveListingCount - 50, 0), 150) * 5).toFixed(2)}</td>
                       </tr>
                     )}
-                    {(manifest.listings ?? 0) > 200 && (
+                    {effectiveListingCount > 200 && (
                       <tr>
-                        <td className="py-0.5">Listings 201–{manifest.listings ?? 0} @ $3.00</td>
-                        <td className="text-right font-medium">${(Math.max((manifest.listings ?? 0) - 200, 0) * 3).toFixed(2)}</td>
+                        <td className="py-0.5">Listings 201–{effectiveListingCount} @ $3.00</td>
+                        <td className="text-right font-medium">${(Math.max(effectiveListingCount - 200, 0) * 3).toFixed(2)}</td>
                       </tr>
                     )}
                     <tr className="border-t border-stone-200">
@@ -876,7 +912,7 @@ export default function Migrate() {
               <div className="space-y-1 text-sm">
                 <div className="flex justify-between">
                   <span className="text-slate-500">
-                    {pricingMode === 'flat_tier' ? `${pricing.tier} flat rate` : `Per-listing (${manifest.listings} listings)`}
+                    {pricingMode === 'flat_tier' ? `${effectiveTier} flat rate` : `Per-listing (${effectiveListingCount} ${isPilotPricing ? 'pilot ' : ''}listings)`}
                   </span>
                   <span className="font-medium text-slate-900">{formatPrice(baseCents)}</span>
                 </div>
