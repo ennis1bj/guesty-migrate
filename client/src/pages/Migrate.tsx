@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
 import StepWizard from '../components/StepWizard';
@@ -113,6 +113,7 @@ function getTierLabel(count: number): string {
 
 export default function Migrate() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const isDemo = !!user?.is_demo;
   const isBeta = !!(user as any)?.is_beta &&
     !!(user as any)?.beta_expires_at &&
@@ -303,6 +304,7 @@ export default function Migrate() {
         selectedListingIds: selectedListingIds.length < allListingIds.length ? selectedListingIds : undefined,
       });
       setCurrentStep(4);
+      navigate(`/migrate?step=progress&migrationId=${migrationId}`, { replace: true });
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to activate demo migration');
     } finally {
@@ -322,6 +324,7 @@ export default function Migrate() {
         selectedListingIds: selectedListingIds.length < allListingIds.length ? selectedListingIds : undefined,
       });
       setCurrentStep(4);
+      navigate(`/migrate?step=progress&migrationId=${migrationId}`, { replace: true });
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to activate beta migration');
     } finally {

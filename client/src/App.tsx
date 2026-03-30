@@ -15,12 +15,14 @@ import Privacy from './pages/Privacy';
 import MigratePreview from './pages/MigratePreview';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, authLoading } = useAuth();
+  if (authLoading) return null;
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" />;
 }
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, authLoading, user } = useAuth();
+  if (authLoading) return null;
   if (!isAuthenticated) return <Navigate to="/login" />;
   if (!user?.is_admin) return <Navigate to="/dashboard" />;
   return <>{children}</>;

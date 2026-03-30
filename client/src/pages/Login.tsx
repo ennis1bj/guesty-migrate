@@ -1,16 +1,23 @@
 import { useState, FormEvent } from 'react';
-import { Link, useNavigate, Navigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import api from '../api';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { login, isAuthenticated } = useAuth();
+  const { login, isAuthenticated, authLoading } = useAuth();
   const navigate = useNavigate();
 
-  if (isAuthenticated) return <Navigate to="/dashboard" replace />;
+  // While the session check is in flight, render nothing so ProtectedRoute
+  // doesn't race-redirect us. Once resolved, redirect already-logged-in users.
+  if (authLoading) return null;
+  if (isAuthenticated) {
+    navigate('/dashboard', { replace: true });
+    return null;
+  }
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -19,7 +26,25 @@ export default function Login() {
 
     try {
       await login(email, password);
-      navigate('/dashboard');
+
+      // After a successful login, check whether there is an in-progress
+      // migration (paid or running). If so, take the user directly to the
+      // live progress view so they don't feel "locked out".
+      try {
+        const { data } = await api.get('/migrations');
+        const active = (data.migrations ?? []).find(
+          (m: { id: string; status: string }) =>
+            m.status === 'running' || m.status === 'paid'
+        );
+        if (active) {
+          navigate(`/migrate?step=progress&migrationId=${active.id}`, { replace: true });
+          return;
+        }
+      } catch {
+        // If the migrations fetch fails, fall through to the default destination.
+      }
+
+      navigate('/dashboard', { replace: true });
     } catch (err: any) {
       setError(err.response?.data?.error || 'Login failed');
     } finally {
