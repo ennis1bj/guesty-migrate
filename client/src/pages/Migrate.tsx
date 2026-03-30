@@ -734,7 +734,12 @@ export default function Migrate() {
           <div className="mt-8 p-5 bg-[#fafaf8] border border-stone-200 rounded-xl flex items-center justify-between">
             <div>
               <p className="text-sm text-slate-400">Migration Price</p>
-              {pricing.requiresQuote ? (
+              {(isBeta || isDemo) ? (
+                <>
+                  <p className="text-2xl font-bold text-slate-900">No charge</p>
+                  <p className="text-sm text-slate-400">{isBeta ? 'Beta account' : 'Demo account'} — payment bypassed</p>
+                </>
+              ) : pricing.requiresQuote ? (
                 <>
                   <p className="text-2xl font-bold text-slate-900">Custom Quote</p>
                   <p className="text-sm text-slate-400">500+ listings</p>
@@ -746,7 +751,7 @@ export default function Migrate() {
                 </>
               )}
             </div>
-            {pricing.requiresQuote ? (
+            {(!isBeta && !isDemo) && pricing.requiresQuote ? (
               <button
                 onClick={() => setShowQuoteModal(true)}
                 className="bg-amber-500 hover:bg-amber-600 text-slate-900 px-8 py-3 rounded-xl font-semibold shadow-sm hover:shadow-md transition-all duration-200"
@@ -767,7 +772,7 @@ export default function Migrate() {
       )}
 
       {/* Step 3: Payment */}
-      {currentStep === 2 && pricing && !pricing.requiresQuote && manifest && (
+      {currentStep === 2 && pricing && (!pricing.requiresQuote || isBeta || isDemo) && manifest && (
         <div className="bg-white rounded-2xl shadow-sm border border-stone-200 p-8">
           <div className="max-w-2xl mx-auto">
             <div className="w-16 h-16 bg-amber-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
@@ -775,207 +780,264 @@ export default function Migrate() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
               </svg>
             </div>
-            <h2 className="text-xl font-bold text-slate-900 mb-2 text-center">Choose Your Pricing</h2>
-            <p className="text-slate-500 mb-4 text-center">
-              Select a pricing mode and any optional add-ons for your migration.
-            </p>
-            {isPilotPricing && (
-              <div className="mb-6 flex items-center gap-2 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 font-medium">
-                <svg className="w-4 h-4 flex-shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Pilot mode — pricing is based on your {effectiveListingCount} selected listing{effectiveListingCount === 1 ? '' : 's'}, not the full account.
-              </div>
-            )}
-
-            {/* Pricing Mode Toggle */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
-              <button
-                onClick={() => setPricingMode('flat_tier')}
-                className={`relative p-5 rounded-xl border-2 text-left transition-all duration-200 ${
-                  pricingMode === 'flat_tier'
-                    ? 'border-amber-500 bg-amber-50 ring-1 ring-amber-500'
-                    : 'border-stone-200 hover:border-stone-300'
-                }`}
-              >
-                {flatIsBetter && (
-                  <span className="absolute -top-2.5 left-4 bg-emerald-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-                    Best value
-                  </span>
-                )}
-                <div className="flex items-center gap-3 mb-2">
-                  <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                    pricingMode === 'flat_tier' ? 'border-amber-500' : 'border-stone-300'
-                  }`}>
-                    {pricingMode === 'flat_tier' && <div className="w-2 h-2 rounded-full bg-amber-500" />}
+            {(isBeta || isDemo) ? (
+              /* ── Beta / Demo: payment-free confirmation ── */
+              <>
+                <h2 className="text-xl font-bold text-slate-900 mb-2 text-center">Confirm Migration</h2>
+                <div className={`mb-6 flex items-center gap-3 px-4 py-4 ${isBeta ? 'bg-purple-50 border-purple-200' : 'bg-amber-50 border-amber-200'} border rounded-xl`}>
+                  <svg className={`w-5 h-5 flex-shrink-0 ${isBeta ? 'text-purple-500' : 'text-amber-500'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                  </svg>
+                  <div>
+                    <p className={`text-sm font-bold ${isBeta ? 'text-purple-900' : 'text-amber-900'}`}>
+                      {isBeta ? 'Beta account — no payment required' : 'Demo account — no payment required'}
+                    </p>
+                    <p className={`text-xs mt-0.5 ${isBeta ? 'text-purple-700' : 'text-amber-700'}`}>
+                      All features are available to you at no charge. Your migration will start immediately.
+                    </p>
                   </div>
-                  <span className="font-bold text-slate-900">Flat Rate</span>
                 </div>
-                <p className="text-2xl font-extrabold text-slate-900 ml-7">{formatPrice(flatCents)}</p>
-                <p className="text-sm text-slate-400 ml-7 capitalize">{effectiveTier} tier — {effectiveListingCount} {isPilotPricing ? 'pilot ' : ''}listings</p>
-              </button>
 
-              <button
-                onClick={() => setPricingMode('per_listing')}
-                className={`relative p-5 rounded-xl border-2 text-left transition-all duration-200 ${
-                  pricingMode === 'per_listing'
-                    ? 'border-amber-500 bg-amber-50 ring-1 ring-amber-500'
-                    : 'border-stone-200 hover:border-stone-300'
-                }`}
-              >
-                {!flatIsBetter && (
-                  <span className="absolute -top-2.5 left-4 bg-emerald-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-                    Best value
-                  </span>
-                )}
-                <div className="flex items-center gap-3 mb-2">
-                  <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                    pricingMode === 'per_listing' ? 'border-amber-500' : 'border-stone-300'
-                  }`}>
-                    {pricingMode === 'per_listing' && <div className="w-2 h-2 rounded-full bg-amber-500" />}
+                {isPilotPricing && (
+                  <div className="mb-6 flex items-center gap-2 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 font-medium">
+                    <svg className="w-4 h-4 flex-shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Pilot mode — migrating {effectiveListingCount} selected listing{effectiveListingCount === 1 ? '' : 's'}.
                   </div>
-                  <span className="font-bold text-slate-900">Per Listing</span>
+                )}
+
+                {/* Add-ons for beta/demo (no prices shown — all included) */}
+                <div className="mb-6">
+                  <h3 className="text-sm font-bold text-slate-700 mb-3">Optional features</h3>
+                  <div className="space-y-2">
+                    {ADD_ONS.map((addon) => (
+                      <label
+                        key={addon.key}
+                        className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all duration-200 ${
+                          selectedAddOns.includes(addon.key)
+                            ? 'border-amber-400 bg-amber-50'
+                            : 'border-stone-200 hover:border-stone-300'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedAddOns.includes(addon.key)}
+                          onChange={() => toggleAddOn(addon.key)}
+                          className="mt-0.5 w-4 h-4 text-amber-500 rounded border-stone-300 focus:ring-amber-500/30 flex-shrink-0"
+                        />
+                        <div className="flex-1">
+                          <span className="text-sm font-semibold text-slate-900">{addon.name}</span>
+                          <p className="text-xs text-slate-400 mt-0.5">{addon.description}</p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
                 </div>
-                <p className="text-2xl font-extrabold text-slate-900 ml-7">{formatPrice(perListingCents)}</p>
-                <p className="text-sm text-slate-400 ml-7">$79 base + graduated per-listing rate</p>
-              </button>
-            </div>
 
-            {/* Per-listing breakdown */}
-            {pricingMode === 'per_listing' && (
-              <div className="mb-8 p-5 bg-[#fafaf8] border border-stone-200 rounded-xl text-sm">
-                <h4 className="font-bold text-slate-700 mb-2">Rate Breakdown</h4>
-                <table className="w-full text-left">
-                  <tbody className="text-slate-600">
-                    <tr><td className="py-0.5">Base fee</td><td className="text-right font-medium">$79.00</td></tr>
-                    {effectiveListingCount > 0 && (
-                      <tr>
-                        <td className="py-0.5">Listings 1–{Math.min(effectiveListingCount, 50)} @ $8.00</td>
-                        <td className="text-right font-medium">${(Math.min(effectiveListingCount, 50) * 8).toFixed(2)}</td>
-                      </tr>
-                    )}
-                    {effectiveListingCount > 50 && (
-                      <tr>
-                        <td className="py-0.5">Listings 51–{Math.min(effectiveListingCount, 200)} @ $5.00</td>
-                        <td className="text-right font-medium">${(Math.min(Math.max(effectiveListingCount - 50, 0), 150) * 5).toFixed(2)}</td>
-                      </tr>
-                    )}
-                    {effectiveListingCount > 200 && (
-                      <tr>
-                        <td className="py-0.5">Listings 201–{effectiveListingCount} @ $3.00</td>
-                        <td className="text-right font-medium">${(Math.max(effectiveListingCount - 200, 0) * 3).toFixed(2)}</td>
-                      </tr>
-                    )}
-                    <tr className="border-t border-stone-200">
-                      <td className="pt-2 font-bold text-slate-900">Total</td>
-                      <td className="pt-2 text-right font-extrabold text-slate-900">{formatPrice(perListingCents)}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            )}
+                <p className="text-sm text-slate-400 mb-6 text-center">
+                  Migrating {selectedCategories.length} categories: {selectedCategories.join(', ')}
+                </p>
 
-            {/* Add-ons */}
-            <div className="mb-8">
-              <h3 className="text-lg font-bold text-slate-900 mb-4">Optional Add-ons</h3>
-              <div className="space-y-3">
-                {ADD_ONS.map((addon) => (
-                  <label
-                    key={addon.key}
-                    className={`flex items-start gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all duration-200 ${
-                      selectedAddOns.includes(addon.key)
-                        ? 'border-amber-500 bg-amber-50'
-                        : 'border-stone-200 hover:border-stone-300'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedAddOns.includes(addon.key)}
-                      onChange={() => toggleAddOn(addon.key)}
-                      className="mt-1 w-4 h-4 text-amber-500 rounded border-stone-300 focus:ring-amber-500/30"
-                    />
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-slate-900">{addon.name}</span>
-                        <span className="font-extrabold text-slate-900">{formatPrice(addon.priceCents)}</span>
-                      </div>
-                      <p className="text-sm text-slate-400 mt-0.5">{addon.description}</p>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            {/* Order Summary */}
-            <div className="p-5 bg-[#fafaf8] border border-stone-200 rounded-xl mb-6">
-              <h3 className="text-sm font-bold text-slate-700 mb-3">Order Summary</h3>
-              <div className="space-y-1 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">
-                    {pricingMode === 'flat_tier' ? `${effectiveTier} flat rate` : `Per-listing (${effectiveListingCount} ${isPilotPricing ? 'pilot ' : ''}listings)`}
-                  </span>
-                  <span className="font-medium text-slate-900">{formatPrice(baseCents)}</span>
-                </div>
-                {selectedAddOns.map((key) => {
-                  const a = ADD_ONS.find((ao) => ao.key === key);
-                  return a ? (
-                    <div key={key} className="flex justify-between">
-                      <span className="text-slate-500">{a.name}</span>
-                      <span className="font-medium text-slate-900">{formatPrice(a.priceCents)}</span>
-                    </div>
-                  ) : null;
-                })}
-                <div className="flex justify-between pt-2 border-t border-stone-200">
-                  <span className="font-bold text-slate-900">Total</span>
-                  <span className="font-extrabold text-lg text-slate-900">{formatPrice(grandTotal)}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* What's included */}
-            <div className="p-5 bg-[#fafaf8] border border-stone-200 rounded-xl text-left mb-6">
-              <h3 className="text-sm font-bold text-slate-700 mb-2">What's included</h3>
-              <ul className="text-sm text-slate-500 space-y-1">
-                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Listings (including complex/MTL hierarchies), guests, owners, reservations (direct only)</li>
-                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Saved replies with listing ID remapping</li>
-                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Tasks with listing and assignee remapping</li>
-                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Custom fields and account-level fees</li>
-                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Native listing photos and calendar blocks</li>
-                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Verification report emailed on completion</li>
-              </ul>
-              <h3 className="text-sm font-bold text-slate-700 mt-4 mb-2">What's not included</h3>
-              <ul className="text-sm text-slate-500 space-y-1">
-                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg> Channel reservations — re-sync via channel reconnect</li>
-                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg> Airbnb/Vrbo reviews — tied to the channel listing</li>
-                <li className="flex items-center gap-2"><svg className="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg> Task assignees — tasks migrate unassigned</li>
-              </ul>
-            </div>
-
-            <p className="text-sm text-slate-400 mb-6 text-center">
-              Migrating {selectedCategories.length} categories: {selectedCategories.join(', ')}
-            </p>
-
-            {isDemo || isBeta ? (
-              <div className="space-y-3">
-                <div className={`p-3 ${isBeta ? 'bg-purple-50 border-purple-200' : 'bg-amber-50 border-amber-200'} border rounded-xl text-sm ${isBeta ? 'text-purple-800' : 'text-amber-800'} font-medium`}>
-                  {isBeta ? 'Beta account — payment bypassed' : 'Demo account — payment bypassed'}
-                </div>
                 <button
                   onClick={isBeta ? handleBetaActivate : handleDemoActivate}
                   disabled={loading}
                   className="w-full bg-amber-500 hover:bg-amber-600 text-slate-900 px-8 py-3 rounded-xl font-semibold shadow-sm hover:shadow-md disabled:opacity-50 transition-all duration-200"
                 >
-                  {loading ? 'Starting...' : `Start Migration (${isBeta ? 'Beta' : 'Demo'})`}
+                  {loading ? 'Starting...' : 'Start Migration'}
                 </button>
-              </div>
+              </>
             ) : (
-              <button
-                onClick={handleCheckout}
-                disabled={loading}
-                className="w-full bg-amber-500 hover:bg-amber-600 text-slate-900 px-8 py-3 rounded-xl font-semibold shadow-sm hover:shadow-md disabled:opacity-50 transition-all duration-200"
-              >
-                {loading ? 'Redirecting...' : `Pay ${formatPrice(grandTotal)} & Start Migration`}
-              </button>
+              /* ── Regular paying users ── */
+              <>
+                <h2 className="text-xl font-bold text-slate-900 mb-2 text-center">Choose Your Pricing</h2>
+                <p className="text-slate-500 mb-4 text-center">
+                  Select a pricing mode and any optional add-ons for your migration.
+                </p>
+                {isPilotPricing && (
+                  <div className="mb-6 flex items-center gap-2 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 font-medium">
+                    <svg className="w-4 h-4 flex-shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Pilot mode — pricing is based on your {effectiveListingCount} selected listing{effectiveListingCount === 1 ? '' : 's'}, not the full account.
+                  </div>
+                )}
+
+                {/* Pricing Mode Toggle */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
+                  <button
+                    onClick={() => setPricingMode('flat_tier')}
+                    className={`relative p-5 rounded-xl border-2 text-left transition-all duration-200 ${
+                      pricingMode === 'flat_tier'
+                        ? 'border-amber-500 bg-amber-50 ring-1 ring-amber-500'
+                        : 'border-stone-200 hover:border-stone-300'
+                    }`}
+                  >
+                    {flatIsBetter && (
+                      <span className="absolute -top-2.5 left-4 bg-emerald-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                        Best value
+                      </span>
+                    )}
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                        pricingMode === 'flat_tier' ? 'border-amber-500' : 'border-stone-300'
+                      }`}>
+                        {pricingMode === 'flat_tier' && <div className="w-2 h-2 rounded-full bg-amber-500" />}
+                      </div>
+                      <span className="font-bold text-slate-900">Flat Rate</span>
+                    </div>
+                    <p className="text-2xl font-extrabold text-slate-900 ml-7">{formatPrice(flatCents)}</p>
+                    <p className="text-sm text-slate-400 ml-7 capitalize">{effectiveTier} tier — {effectiveListingCount} {isPilotPricing ? 'pilot ' : ''}listings</p>
+                  </button>
+
+                  <button
+                    onClick={() => setPricingMode('per_listing')}
+                    className={`relative p-5 rounded-xl border-2 text-left transition-all duration-200 ${
+                      pricingMode === 'per_listing'
+                        ? 'border-amber-500 bg-amber-50 ring-1 ring-amber-500'
+                        : 'border-stone-200 hover:border-stone-300'
+                    }`}
+                  >
+                    {!flatIsBetter && (
+                      <span className="absolute -top-2.5 left-4 bg-emerald-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                        Best value
+                      </span>
+                    )}
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                        pricingMode === 'per_listing' ? 'border-amber-500' : 'border-stone-300'
+                      }`}>
+                        {pricingMode === 'per_listing' && <div className="w-2 h-2 rounded-full bg-amber-500" />}
+                      </div>
+                      <span className="font-bold text-slate-900">Per Listing</span>
+                    </div>
+                    <p className="text-2xl font-extrabold text-slate-900 ml-7">{formatPrice(perListingCents)}</p>
+                    <p className="text-sm text-slate-400 ml-7">$79 base + graduated per-listing rate</p>
+                  </button>
+                </div>
+
+                {/* Per-listing breakdown */}
+                {pricingMode === 'per_listing' && (
+                  <div className="mb-8 p-5 bg-[#fafaf8] border border-stone-200 rounded-xl text-sm">
+                    <h4 className="font-bold text-slate-700 mb-2">Rate Breakdown</h4>
+                    <table className="w-full text-left">
+                      <tbody className="text-slate-600">
+                        <tr><td className="py-0.5">Base fee</td><td className="text-right font-medium">$79.00</td></tr>
+                        {effectiveListingCount > 0 && (
+                          <tr>
+                            <td className="py-0.5">Listings 1–{Math.min(effectiveListingCount, 50)} @ $8.00</td>
+                            <td className="text-right font-medium">${(Math.min(effectiveListingCount, 50) * 8).toFixed(2)}</td>
+                          </tr>
+                        )}
+                        {effectiveListingCount > 50 && (
+                          <tr>
+                            <td className="py-0.5">Listings 51–{Math.min(effectiveListingCount, 200)} @ $5.00</td>
+                            <td className="text-right font-medium">${(Math.min(Math.max(effectiveListingCount - 50, 0), 150) * 5).toFixed(2)}</td>
+                          </tr>
+                        )}
+                        {effectiveListingCount > 200 && (
+                          <tr>
+                            <td className="py-0.5">Listings 201–{effectiveListingCount} @ $3.00</td>
+                            <td className="text-right font-medium">${(Math.max(effectiveListingCount - 200, 0) * 3).toFixed(2)}</td>
+                          </tr>
+                        )}
+                        <tr className="border-t border-stone-200">
+                          <td className="pt-2 font-bold text-slate-900">Total</td>
+                          <td className="pt-2 text-right font-extrabold text-slate-900">{formatPrice(perListingCents)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Add-ons */}
+                <div className="mb-8">
+                  <h3 className="text-lg font-bold text-slate-900 mb-4">Optional Add-ons</h3>
+                  <div className="space-y-3">
+                    {ADD_ONS.map((addon) => (
+                      <label
+                        key={addon.key}
+                        className={`flex items-start gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all duration-200 ${
+                          selectedAddOns.includes(addon.key)
+                            ? 'border-amber-500 bg-amber-50'
+                            : 'border-stone-200 hover:border-stone-300'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedAddOns.includes(addon.key)}
+                          onChange={() => toggleAddOn(addon.key)}
+                          className="mt-1 w-4 h-4 text-amber-500 rounded border-stone-300 focus:ring-amber-500/30"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-slate-900">{addon.name}</span>
+                            <span className="font-extrabold text-slate-900">{formatPrice(addon.priceCents)}</span>
+                          </div>
+                          <p className="text-sm text-slate-400 mt-0.5">{addon.description}</p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Order Summary */}
+                <div className="p-5 bg-[#fafaf8] border border-stone-200 rounded-xl mb-6">
+                  <h3 className="text-sm font-bold text-slate-700 mb-3">Order Summary</h3>
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">
+                        {pricingMode === 'flat_tier' ? `${effectiveTier} flat rate` : `Per-listing (${effectiveListingCount} ${isPilotPricing ? 'pilot ' : ''}listings)`}
+                      </span>
+                      <span className="font-medium text-slate-900">{formatPrice(baseCents)}</span>
+                    </div>
+                    {selectedAddOns.map((key) => {
+                      const a = ADD_ONS.find((ao) => ao.key === key);
+                      return a ? (
+                        <div key={key} className="flex justify-between">
+                          <span className="text-slate-500">{a.name}</span>
+                          <span className="font-medium text-slate-900">{formatPrice(a.priceCents)}</span>
+                        </div>
+                      ) : null;
+                    })}
+                    <div className="flex justify-between pt-2 border-t border-stone-200">
+                      <span className="font-bold text-slate-900">Total</span>
+                      <span className="font-extrabold text-lg text-slate-900">{formatPrice(grandTotal)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* What's included */}
+                <div className="p-5 bg-[#fafaf8] border border-stone-200 rounded-xl text-left mb-6">
+                  <h3 className="text-sm font-bold text-slate-700 mb-2">What's included</h3>
+                  <ul className="text-sm text-slate-500 space-y-1">
+                    <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Listings (including complex/MTL hierarchies), guests, owners, reservations (direct only)</li>
+                    <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Saved replies with listing ID remapping</li>
+                    <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Tasks with listing and assignee remapping</li>
+                    <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Custom fields and account-level fees</li>
+                    <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Native listing photos and calendar blocks</li>
+                    <li className="flex items-center gap-2"><svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Verification report emailed on completion</li>
+                  </ul>
+                  <h3 className="text-sm font-bold text-slate-700 mt-4 mb-2">What's not included</h3>
+                  <ul className="text-sm text-slate-500 space-y-1">
+                    <li className="flex items-center gap-2"><svg className="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg> Channel reservations — re-sync via channel reconnect</li>
+                    <li className="flex items-center gap-2"><svg className="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg> Airbnb/Vrbo reviews — tied to the channel listing</li>
+                    <li className="flex items-center gap-2"><svg className="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg> Task assignees — tasks migrate unassigned</li>
+                  </ul>
+                </div>
+
+                <p className="text-sm text-slate-400 mb-6 text-center">
+                  Migrating {selectedCategories.length} categories: {selectedCategories.join(', ')}
+                </p>
+
+                <button
+                  onClick={handleCheckout}
+                  disabled={loading}
+                  className="w-full bg-amber-500 hover:bg-amber-600 text-slate-900 px-8 py-3 rounded-xl font-semibold shadow-sm hover:shadow-md disabled:opacity-50 transition-all duration-200"
+                >
+                  {loading ? 'Redirecting...' : `Pay ${formatPrice(grandTotal)} & Start Migration`}
+                </button>
+              </>
             )}
             <button
               onClick={() => setCurrentStep(1)}
