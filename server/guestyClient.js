@@ -220,6 +220,10 @@ class GuestyClient {
   }
 
   async getAllFees() {
+    // Guesty /additional-fees/account response shape is not fully documented;
+    // getAllPaginated tries .results first then falls back to the raw response,
+    // which covers { results: [...] } and plain-array responses. If the real
+    // API uses a different root key (e.g. 'fees'), adjust the key below.
     return this.getAllPaginated('/additional-fees/account', 'results');
   }
 

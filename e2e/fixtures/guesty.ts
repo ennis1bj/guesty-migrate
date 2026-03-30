@@ -33,14 +33,11 @@ export const GUESTY_RESPONSES = {
   listings:           { results: [{ _id: 'lst-001', nickname: 'Beach House', active: true }, { _id: 'lst-002', nickname: 'City Flat', active: true }], count: 2 },
   listingCustomFields:{ results: [{ _id: 'cf-lst-1', fieldId: 'cf-001', value: 'test' }], count: 1 },
   customFields:       { results: [{ _id: 'cf-001', name: 'Pet Policy' }, { _id: 'cf-002', name: 'Check-in Notes' }], count: 2 },
-  rateStrategies:     { results: [{ _id: 'rs-001', name: 'Standard' }], count: 1 },
   fees:               { results: [{ _id: 'fee-001', name: 'Cleaning' }, { _id: 'fee-002', name: 'Pet' }], count: 2 },
-  taxes:              { results: [{ _id: 'tax-001', name: 'City Tax' }], count: 1 },
   guests:             { results: [{ _id: 'g-001', email: 'a@ex.com' }, { _id: 'g-002', email: 'b@ex.com' }, { _id: 'g-003', email: 'c@ex.com' }], count: 3 },
   owners:             { results: [{ _id: 'o-001', email: 'owner@ex.com' }], count: 1 },
   savedReplies:       { results: [{ _id: 'sr-001', title: 'Welcome' }, { _id: 'sr-002', title: 'Checkout' }], count: 2 },
   reservations:       { results: [{ _id: 'r-001' }, { _id: 'r-002' }, { _id: 'r-003' }, { _id: 'r-004' }], count: 4 },
-  automations:        { results: [{ _id: 'auto-001', name: 'Post-checkout' }], count: 1 },
   tasks:              { results: [{ _id: 'task-001', title: 'Inspect' }, { _id: 'task-002', title: 'Restock' }], count: 2 },
 };
 
