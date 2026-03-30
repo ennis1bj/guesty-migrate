@@ -12,6 +12,14 @@ jest.mock('../../server/queue', () => ({
   enqueueMigration: jest.fn().mockResolvedValue(undefined),
 }));
 
+const MOCK_STRIPE_SESSION = { id: 'cs_test_session_123', url: 'https://checkout.stripe.com/test' };
+const mockStripeSessionCreate = jest.fn().mockResolvedValue(MOCK_STRIPE_SESSION);
+jest.mock('stripe', () =>
+  jest.fn(() => ({
+    checkout: { sessions: { create: mockStripeSessionCreate } },
+  }))
+);
+
 const { pool } = require('../../server/db');
 const { enqueueMigration } = require('../../server/queue');
 const app = require('../../server/index');
@@ -192,5 +200,163 @@ describe('POST /api/migrations/:id/demo-activate', () => {
       .send({});
 
     expect(res.status).toBe(404);
+  });
+});
+
+// ── POST /api/migrations/:id/checkout ────────────────────────────────────────
+
+const NON_BETA_USER = { is_beta: false, beta_expires_at: null };
+const ACTIVE_BETA_USER = {
+  is_beta: true,
+  beta_expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+};
+const EXPIRED_BETA_USER = {
+  is_beta: true,
+  beta_expires_at: new Date(Date.now() - 1000).toISOString(),
+};
+const MEDIUM_MIGRATION = {
+  ...PENDING_MIGRATION,
+  manifest: { listings: 20, custom_fields: 2, fees: 1, reservations: 10, guests: 8, owners: 2, tasks: 0, photos: 20 },
+};
+const ENTERPRISE_MIGRATION = {
+  ...PENDING_MIGRATION,
+  manifest: { listings: 600, custom_fields: 2, fees: 1, reservations: 10, guests: 8, owners: 2, tasks: 0, photos: 20 },
+};
+
+function betaCheckoutMocks(migration, betaUser) {
+  pool.query
+    .mockResolvedValueOnce({ rows: [migration] })
+    .mockResolvedValueOnce({ rows: [] })
+    .mockResolvedValueOnce({ rows: [betaUser] })
+    .mockResolvedValueOnce({ rows: [] });
+}
+
+function nonBetaCheckoutMocks(migration) {
+  pool.query
+    .mockResolvedValueOnce({ rows: [migration] })
+    .mockResolvedValueOnce({ rows: [] })
+    .mockResolvedValueOnce({ rows: [NON_BETA_USER] })
+    .mockResolvedValueOnce({ rows: [] });
+}
+
+describe('POST /api/migrations/:id/checkout', () => {
+  beforeEach(() => {
+    mockStripeSessionCreate.mockClear();
+    process.env.STRIPE_SECRET_KEY = 'sk_test_fake';
+    process.env.STRIPE_PRICE_GROWTH = 'price_test_growth';
+  });
+
+  test('401 — unauthenticated request is rejected', async () => {
+    const res = await request(app)
+      .post(`/api/migrations/${MIGRATION_ID}/checkout`)
+      .send({ selectedCategories: ['listings'] });
+
+    expect(res.status).toBe(401);
+  });
+
+  test('404 — migration not found returns 404', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .post(`/api/migrations/ghost-id/checkout`)
+      .set('Authorization', AUTH)
+      .send({ selectedCategories: ['listings'] });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/not found/i);
+  });
+
+  test('200 — beta user bypasses Stripe and enqueues at priority 1', async () => {
+    betaCheckoutMocks(PENDING_MIGRATION, ACTIVE_BETA_USER);
+
+    const res = await request(app)
+      .post(`/api/migrations/${MIGRATION_ID}/checkout`)
+      .set('Authorization', AUTH)
+      .send({ selectedCategories: ['listings', 'guests', 'reservations'] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.betaBypassed).toBe(true);
+    expect(enqueueMigration).toHaveBeenCalledWith(MIGRATION_ID, { priority: 1 });
+    expect(mockStripeSessionCreate).not.toHaveBeenCalled();
+  });
+
+  test('200 — beta checkout with large selectedListingIds (>100KB) succeeds, not 413', async () => {
+    betaCheckoutMocks(PENDING_MIGRATION, ACTIVE_BETA_USER);
+
+    const manyIds = Array.from({ length: 3500 }, (_, i) =>
+      `${i.toString(16).padStart(8, '0')}-1234-5678-abcd-000000000000`
+    );
+    const payloadBytes = JSON.stringify({ selectedListingIds: manyIds }).length;
+    expect(payloadBytes).toBeGreaterThan(100_000);
+
+    const res = await request(app)
+      .post(`/api/migrations/${MIGRATION_ID}/checkout`)
+      .set('Authorization', AUTH)
+      .send({ selectedCategories: ['listings'], selectedListingIds: manyIds });
+
+    expect(res.status).toBe(200);
+    expect(res.body.betaBypassed).toBe(true);
+  });
+
+  test('200 — expired beta user falls through to normal Stripe checkout', async () => {
+    nonBetaCheckoutMocks(MEDIUM_MIGRATION);
+
+    const res = await request(app)
+      .post(`/api/migrations/${MIGRATION_ID}/checkout`)
+      .set('Authorization', AUTH)
+      .send({ selectedCategories: ['listings'], pricingMode: 'flat_tier' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.betaBypassed).toBeUndefined();
+    expect(res.body.checkoutUrl).toBe(MOCK_STRIPE_SESSION.url);
+    expect(mockStripeSessionCreate).toHaveBeenCalledTimes(1);
+  });
+
+  test('400 — 500+ listing account returns requiresQuote without calling Stripe', async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [ENTERPRISE_MIGRATION] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [NON_BETA_USER] });
+
+    const res = await request(app)
+      .post(`/api/migrations/${MIGRATION_ID}/checkout`)
+      .set('Authorization', AUTH)
+      .send({ selectedCategories: ['listings'] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.requiresQuote).toBe(true);
+    expect(mockStripeSessionCreate).not.toHaveBeenCalled();
+  });
+
+  test('400 — custom selection of 500+ listings triggers requiresQuote', async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [PENDING_MIGRATION] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [NON_BETA_USER] });
+
+    const bigSelection = Array.from({ length: 550 }, (_, i) =>
+      `${i.toString(16).padStart(8, '0')}-0000-0000-0000-000000000000`
+    );
+
+    const res = await request(app)
+      .post(`/api/migrations/${MIGRATION_ID}/checkout`)
+      .set('Authorization', AUTH)
+      .send({ selectedCategories: ['listings'], selectedListingIds: bigSelection });
+
+    expect(res.status).toBe(400);
+    expect(res.body.requiresQuote).toBe(true);
+  });
+
+  test('503 — checkout returns error when Stripe key is not configured', async () => {
+    delete process.env.STRIPE_SECRET_KEY;
+    nonBetaCheckoutMocks(MEDIUM_MIGRATION);
+
+    const res = await request(app)
+      .post(`/api/migrations/${MIGRATION_ID}/checkout`)
+      .set('Authorization', AUTH)
+      .send({ selectedCategories: ['listings'] });
+
+    expect(res.status).toBe(503);
+    expect(res.body.error).toMatch(/payment processing/i);
   });
 });
