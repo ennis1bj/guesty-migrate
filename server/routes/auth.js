@@ -313,12 +313,12 @@ router.post('/resend-verification-public',
 
       const user = userResult.rows[0];
 
-      // 5-minute cooldown check
+      // 5-minute cooldown check — silently succeed to avoid leaking account state
       if (user.verify_token_expires) {
         const expiresAt = new Date(user.verify_token_expires).getTime();
         const cooldownCutoff = Date.now() + (24 * 60 - 5) * 60 * 1000;
         if (expiresAt > cooldownCutoff) {
-          return res.status(429).json({ error: 'Please wait a few minutes before requesting another verification email.' });
+          return res.json({ success: true, message: 'If this email is registered and unverified, a new link has been sent.' });
         }
       }
 
