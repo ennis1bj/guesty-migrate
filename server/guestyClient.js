@@ -2,15 +2,49 @@ const axios = require('axios');
 const FormData = require('form-data');
 const { pool } = require('./db');
 const { encrypt, decrypt } = require('./encryption');
+const { logger } = require('./logger');
 
 const BASE_URL = (process.env.GUESTY_BASE_URL || 'https://open-api.guesty.com') + '/v1';
 const AUTH_URL = (process.env.GUESTY_AUTH_URL || 'https://open-api.guesty.com') + '/oauth2/token';
+
+/**
+ * Simple promise-based semaphore.  Limits the number of concurrent tasks
+ * to `max`; additional callers queue until a slot is released.
+ */
+class Semaphore {
+  constructor(max) {
+    this.max = max;
+    this.count = 0;
+    this.queue = [];
+  }
+
+  acquire() {
+    if (this.count < this.max) {
+      this.count++;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => this.queue.push(resolve));
+  }
+
+  release() {
+    if (this.queue.length > 0) {
+      const next = this.queue.shift();
+      next(); // hand the slot to the next waiter
+    } else {
+      this.count--;
+    }
+  }
+}
 
 class GuestyClient {
   constructor({ clientId, clientSecret }) {
     this.clientId = clientId;
     this.clientSecret = clientSecret;
     this.maxRetries = 3;
+    // Limit concurrent requests to the Guesty API to avoid triggering 429s
+    // when multiple operations (preflight counts, parallel page fetches, etc.)
+    // are in-flight simultaneously.
+    this.semaphore = new Semaphore(5);
   }
 
   async getAccessToken() {
@@ -71,6 +105,11 @@ class GuestyClient {
 
   async request(method, path, data = null, retries = 0) {
     const token = await this.getAccessToken();
+    await this.semaphore.acquire();
+
+    // retryAfterMs is set when a 429 is caught so we can wait AFTER releasing
+    // the semaphore slot — avoiding blocking other requests during the wait.
+    let retryAfterMs = null;
     try {
       const config = {
         method,
@@ -85,12 +124,17 @@ class GuestyClient {
       return response.data;
     } catch (err) {
       if (err.response && err.response.status === 429 && retries < this.maxRetries) {
-        const retryAfter = parseInt(err.response.headers['retry-after'] || '1', 10);
-        await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000));
-        return this.request(method, path, data, retries + 1);
+        retryAfterMs = parseInt(err.response.headers['retry-after'] || '1', 10) * 1000;
+      } else {
+        throw err;
       }
-      throw err;
+    } finally {
+      this.semaphore.release(); // always free the slot before any wait
     }
+
+    // If we reach here a 429 was caught — wait with the slot free, then retry.
+    await new Promise((resolve) => setTimeout(resolve, retryAfterMs));
+    return this.request(method, path, data, retries + 1);
   }
 
   async getAllPaginated(path, key) {
@@ -222,7 +266,12 @@ class GuestyClient {
       // Fallback: paginate all and count
       const all = await this.getAllPaginated(path, 'results');
       return all.length;
-    } catch {
+    } catch (err) {
+      logger.warn('getCount failed — returning 0', {
+        path,
+        status: err.response?.status,
+        error: err.response?.data?.message || err.message,
+      });
       return 0;
     }
   }

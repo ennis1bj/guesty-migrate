@@ -496,7 +496,7 @@ export default function Migrate() {
 
           <ManifestCard
             manifest={Object.fromEntries(
-              Object.entries(manifest).filter(([k]) => !['photos'].includes(k))
+              Object.entries(manifest).filter(([k]) => !['photos', 'listingDetails'].includes(k))
             )}
             selectedCategories={selectedCategories}
             onToggleCategory={toggleCategory}
