@@ -84,6 +84,8 @@ router.post('/preflight', async (req, res) => {
           type:      l.type || 'STL',
           complexId: l.complexId || null,
           city:      l.address?.city || null,
+          state:     l.address?.state || null,
+          country:   l.address?.country || null,
           isActive:  l.active !== false,
         })),
         pricing_snapshot_available: true,
