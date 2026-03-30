@@ -425,6 +425,74 @@ class GuestyClient {
     });
   }
 
+  // ── Rate strategy methods ─────────────────────────────────────────────────
+
+  async getAllRateStrategies() {
+    return this.getAllPaginated('/revenue-management/rate-strategies', 'results');
+  }
+
+  async createRateStrategy() {
+    throw new Error('Guesty Open API does not expose a rate strategy write endpoint. Use updateListingPricing() instead.');
+  }
+
+  async getRateStrategyByListing(unitTypeId) {
+    try {
+      return await this.request('GET', `/revenue-management/rate-strategies/listing/${unitTypeId}`);
+    } catch (err) {
+      if (err.response?.status === 404) return null;
+      throw err;
+    }
+  }
+
+  // ── Pricing calendar methods ──────────────────────────────────────────────
+
+  async getListingPricingCalendar(listingId, days = 730) {
+    const today = new Date().toISOString().split('T')[0];
+    const endDate = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    try {
+      const data = await this.request(
+        'GET',
+        `/availability-pricing/api/calendar/listings/${listingId}?startDate=${today}&endDate=${endDate}`
+      );
+      return data.days || data.results || [];
+    } catch (err) {
+      if (err.response?.status === 404) return [];
+      throw err;
+    }
+  }
+
+  async updateListingCalendarPricing(listingId, daysArray) {
+    const CHUNK_SIZE = 90;
+    const results = [];
+    for (let i = 0; i < daysArray.length; i += CHUNK_SIZE) {
+      const chunk = daysArray.slice(i, i + CHUNK_SIZE);
+      try {
+        const result = await this.request(
+          'PUT',
+          `/availability-pricing/api/calendar/listings/${listingId}`,
+          { days: chunk }
+        );
+        results.push(result);
+      } catch (err) {
+        logger.warn('Calendar pricing update chunk failed', {
+          listingId,
+          chunkStart: chunk[0]?.date,
+          chunkEnd: chunk[chunk.length - 1]?.date,
+          error: err.response?.data?.message || err.message,
+        });
+      }
+    }
+    return results;
+  }
+
+  async updateListingPricing(listingId, priceFields) {
+    return this.request('PUT', `/listings/${listingId}`, { prices: priceFields });
+  }
+
+  async updateListingAvailabilitySettings(listingId, settings) {
+    return this.request('PUT', `/listings/${listingId}/availability-settings`, settings);
+  }
+
   isChannelListing(listing) {
     return Array.isArray(listing.integrations) &&
            listing.integrations.some(i => i && (i.channelName || i.platform || i.channel));

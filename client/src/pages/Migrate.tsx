@@ -24,10 +24,10 @@ interface ListingDetail {
   isActive?: boolean;
 }
 
-const ALL_CATEGORIES = ['custom_fields', 'fees', 'listings', 'guests', 'owners', 'saved_replies', 'reservations', 'tasks'];
+const ALL_CATEGORIES = ['custom_fields', 'fees', 'listings', 'rate_strategies', 'guests', 'owners', 'saved_replies', 'reservations', 'tasks'];
 
 type PricingMode = 'flat_tier' | 'per_listing';
-type AddOnKey = 'priority' | 'support' | 'remigrate' | 'verify';
+type AddOnKey = 'priority' | 'support' | 'remigrate' | 'verify' | 'pricing_snapshot';
 
 interface Pricing {
   tier: string;
@@ -44,10 +44,11 @@ interface AddOnInfo {
 }
 
 const ADD_ONS: AddOnInfo[] = [
-  { key: 'priority',  name: 'Priority Processing',          description: 'Skip the queue — your migration runs first.',                              priceCents: 9900 },
-  { key: 'support',   name: 'Dedicated Support & Review',   description: 'A migration specialist reviews your setup and assists during the process.',  priceCents: 14900 },
-  { key: 'remigrate', name: 'Re-Migration Pass',            description: 'One free re-run within 30 days if you need to migrate again.',               priceCents: 7900 },
-  { key: 'verify',    name: 'Post-Migration Verify Call',   description: '30-minute video call to walk through your destination account.',             priceCents: 9900 },
+  { key: 'priority',         name: 'Priority Processing',          description: 'Skip the queue — your migration runs first.',                                             priceCents: 9900  },
+  { key: 'support',          name: 'Dedicated Support & Review',   description: 'A migration specialist reviews your setup and assists during the process.',                priceCents: 14900 },
+  { key: 'remigrate',        name: 'Re-Migration Pass',            description: 'One free re-run within 30 days if you need to migrate again.',                            priceCents: 7900  },
+  { key: 'verify',           name: 'Post-Migration Verify Call',   description: '30-minute video call to walk through your destination account.',                          priceCents: 9900  },
+  { key: 'pricing_snapshot', name: 'Pricing Calendar Snapshot',    description: 'Copies 2 years of nightly prices and min-night overrides as hard calendar values.',       priceCents: 14900 },
 ];
 
 interface MigrationStatus {
@@ -508,7 +509,7 @@ export default function Migrate() {
 
           <ManifestCard
             manifest={Object.fromEntries(
-              Object.entries(manifest).filter(([k]) => !['photos', 'listingDetails'].includes(k))
+              Object.entries(manifest).filter(([k]) => !['photos', 'listingDetails', 'pricing_snapshot_available'].includes(k))
             )}
             selectedCategories={selectedCategories}
             onToggleCategory={toggleCategory}

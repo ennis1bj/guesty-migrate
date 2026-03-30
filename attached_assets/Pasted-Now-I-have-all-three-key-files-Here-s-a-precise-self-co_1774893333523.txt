@@ -1,0 +1,423 @@
+Now I have all three key files. Here's a precise, self-contained Replit prompt:
+
+***
+
+Here's the Replit prompt. It's written to be dropped directly into Replit Agent with full context — no ambiguity, no guesswork.
+
+***
+
+## Replit Agent Prompt
+
+```
+You are working in the `guesty-migrate` Node.js/Express codebase. You need to implement rate strategy pricing migration using three layered strategies, since the Guesty Open API has confirmed no write endpoint for rate strategies (POST /rate-strategies returns 404/405).
+
+---
+
+## CONTEXT: How the codebase works
+
+- `server/guestyClient.js` — GuestyClient class with `request()`, `getAllPaginated()`. BASE_URL is `https://open-api.guesty.com/v1`.
+- `server/migrationEngine.js` — `CATEGORIES` map defines per-category getAll/create/transform. `MIGRATION_ORDER` array controls execution order. `runMigration()` loops through categories, runs transform, calls create.
+- `server/routes/migrations.js` — `POST /api/migrations/preflight` builds the manifest. `POST /api/migrations/:id/checkout` accepts `selectedCategories`, `addOns`, and stores them.
+- The `migrations` DB table has columns: `id`, `selected_categories`, `pricing_mode`, `results`, `diff_report`, `manifest`, and more.
+
+---
+
+## WHAT TO BUILD
+
+### 1. Fix the existing `rate_strategies` category (it's broken in two ways)
+
+**Bug 1 — Wrong API path in `guestyClient.js`:**
+The existing `getAllRateStrategies()` calls `/rate-strategies` but the documented endpoint is `/revenue-management/rate-strategies`. Fix both methods:
+
+```js
+async getAllRateStrategies() {
+  return this.getAllPaginated('/revenue-management/rate-strategies', 'results');
+}
+
+// createRateStrategy is now a no-op — POST endpoint confirmed non-existent.
+// Keep the method signature but have it throw a clear error so callers know.
+async createRateStrategy(data) {
+  throw new Error('Guesty Open API does not expose a rate strategy write endpoint. Use applyRatePricingToListing() instead.');
+}
+```
+
+Also add two new methods to `guestyClient.js`:
+
+```js
+// Get rate strategy assigned to a specific listing
+async getRateStrategyByListing(unitTypeId) {
+  try {
+    return await this.request('GET', `/revenue-management/rate-strategies/listing/${unitTypeId}`);
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
+}
+
+// Read the pricing calendar for a listing (post-strategy applied values)
+// Returns array of { date, price, minNights, status } for the next `days` days
+async getListingPricingCalendar(listingId, days = 730) {
+  const today = new Date().toISOString().split('T');
+  const endDate = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().split('T');
+  try {
+    const data = await this.request('GET',
+      `/availability-pricing/api/calendar/listings/${listingId}?startDate=${today}&endDate=${endDate}`
+    );
+    return data.days || data.results || [];
+  } catch (err) {
+    if (err.response?.status === 404) return [];
+    throw err;
+  }
+}
+
+// Write per-day price and minNights overrides to destination listing calendar
+// daysArray: [{ date: 'YYYY-MM-DD', price: number, minNights: number }]
+// Batches into chunks of 90 days to avoid request body size limits
+async updateListingCalendarPricing(listingId, daysArray) {
+  const CHUNK_SIZE = 90;
+  const results = [];
+  for (let i = 0; i < daysArray.length; i += CHUNK_SIZE) {
+    const chunk = daysArray.slice(i, i + CHUNK_SIZE);
+    try {
+      const result = await this.request('PUT',
+        `/availability-pricing/api/calendar/listings/${listingId}`,
+        { days: chunk }
+      );
+      results.push(result);
+    } catch (err) {
+      // Log but don't throw — partial calendar updates are still useful
+      const { logger } = require('./logger');
+      logger.warn('Calendar pricing update chunk failed', {
+        listingId,
+        chunkStart: chunk?.date,
+        chunkEnd: chunk[chunk.length - 1]?.date,
+        error: err.response?.data?.message || err.message,
+      });
+    }
+  }
+  return results;
+}
+
+// Update listing base pricing fields (Strategy 2)
+async updateListingPricing(listingId, priceFields) {
+  // priceFields: { basePrice, weekendBasePrice, weeklyPriceFactor, monthlyPriceFactor, currency }
+  return this.request('PUT', `/listings/${listingId}`, { prices: priceFields });
+}
+
+// Update listing availability settings including day-of-week min nights (Strategy 4)
+async updateListingAvailabilitySettings(listingId, settings) {
+  // settings: { terms: { minNights, maxNights, minNightsByDow } }
+  return this.request('PUT', `/listings/${listingId}/availability-settings`, settings);
+}
+```
+
+---
+
+**Bug 2 — Wrong position in MIGRATION_ORDER in `migrationEngine.js`:**
+`rate_strategies` is currently at position 2 (before `listings`). The transform function remaps `listingIds` against `idMaps.listings`, but that map is empty when rate_strategies runs before listings. 
+
+Remove `rate_strategies` from its current position and move it to after `listings`:
+
+```js
+const MIGRATION_ORDER = [
+  'custom_fields',
+  'fees',
+  'taxes',
+  'listings',
+  'rate_strategies',  // ← moved here, after listings map is populated
+  'guests',
+  'owners',
+  'saved_replies',
+  'reservations',
+  'automations',
+  'tasks',
+];
+```
+
+Also fix the `getCategoryPath` entry for rate_strategies:
+```js
+rate_strategies: '/revenue-management/rate-strategies',
+```
+
+---
+
+### 2. Replace the broken `rate_strategies` CATEGORIES entry with the Strategy 2+4 implementation
+
+In `migrationEngine.js`, replace the existing `rate_strategies` entry in `CATEGORIES` with this:
+
+```js
+rate_strategies: {
+  getAll: (client) => client.getAllRateStrategies(),
+  // No `create` — we write via listing update endpoints instead
+  idField: '_id',
+  // Custom runner: instead of the default create loop, we apply pricing fields to already-migrated listings
+  customRunner: async (sourceItems, sourceClient, destClient, idMaps, log) => {
+    const results = { sourceCount: sourceItems.length, migratedCount: 0, failedCount: 0, skippedCount: 0, errors: [] };
+
+    for (const strategy of sourceItems) {
+      const listingIds = strategy.listingIds || (strategy.listingId ? [strategy.listingId] : []);
+      if (listingIds.length === 0) {
+        results.skippedCount++;
+        continue;
+      }
+
+      for (const sourceListingId of listingIds) {
+        const destListingId = idMaps.listings?.[sourceListingId];
+        if (!destListingId) {
+          results.skippedCount++;
+          continue;
+        }
+
+        try {
+          // Strategy 2: Apply base pricing fields from the strategy to the destination listing
+          const priceFields = {};
+          if (strategy.basePrice != null)          priceFields.basePrice = strategy.basePrice;
+          if (strategy.weekendBasePrice != null)    priceFields.weekendBasePrice = strategy.weekendBasePrice;
+          if (strategy.weeklyPriceFactor != null)   priceFields.weeklyPriceFactor = strategy.weeklyPriceFactor;
+          if (strategy.monthlyPriceFactor != null)  priceFields.monthlyPriceFactor = strategy.monthlyPriceFactor;
+          if (strategy.currency)                    priceFields.currency = strategy.currency;
+
+          if (Object.keys(priceFields).length > 0) {
+            await destClient.updateListingPricing(destListingId, priceFields);
+          }
+
+          // Strategy 4: Apply day-of-week min nights and default min/max nights
+          const availSettings = {};
+          const terms = {};
+          if (strategy.minNights != null)        terms.minNights = strategy.minNights;
+          if (strategy.maxNights != null)        terms.maxNights = strategy.maxNights;
+          if (strategy.minNightsByDow != null)   terms.minNightsByDow = strategy.minNightsByDow;
+          if (Object.keys(terms).length > 0) {
+            availSettings.terms = terms;
+            await destClient.updateListingAvailabilitySettings(destListingId, availSettings);
+          }
+
+          results.migratedCount++;
+        } catch (err) {
+          results.failedCount++;
+          results.errors.push({
+            sourceListingId,
+            destListingId,
+            strategyName: strategy.name,
+            error: err.response?.data?.message || err.message,
+          });
+        }
+      }
+    }
+
+    return results;
+  },
+},
+```
+
+---
+
+### 3. Add `customRunner` support to `runMigration()` in `migrationEngine.js`
+
+The current loop assumes all categories use `categoryDef.create`. Add a branch to handle categories with `customRunner`:
+
+In the per-category loop inside `runMigration()`, after `rawItems` is fetched and `sourceItems` is prepared, add this block BEFORE the existing `for (const item of sourceItems)` loop:
+
+```js
+// If the category defines a customRunner, delegate entirely to it
+if (categoryDef.customRunner) {
+  const customResult = await categoryDef.customRunner(
+    sourceItems, sourceClient, destClient, idMaps, log
+  );
+  results[category] = {
+    sourceCount: customResult.sourceCount,
+    migratedCount: customResult.migratedCount,
+    failedCount: customResult.failedCount,
+  };
+  if (customResult.failedCount > 0) hasFailures = true;
+  await logCategory(
+    migrationId, category,
+    customResult.failedCount === 0 ? 'complete' : 'partial',
+    customResult.sourceCount, customResult.migratedCount,
+    customResult.failedCount, customResult.skippedCount,
+    customResult.errors?.length > 0 ? customResult.errors : null
+  );
+  await updateStatus(migrationId, 'running', { results });
+  continue; // skip the default create loop
+}
+```
+
+---
+
+### 4. Add a new `pricing_snapshot` add-on (Strategy 3 opt-in)
+
+This is a separate migration category that runs AFTER `rate_strategies` and writes per-day price+minNights overrides to the destination calendar, materializing 2 years of the source account's post-strategy pricing as hard calendar overrides.
+
+**Step A — Add `pricing_snapshot` to CATEGORIES in `migrationEngine.js`:**
+
+```js
+pricing_snapshot: {
+  // No getAll needed — data is fetched per-listing inside customRunner
+  idField: '_id',
+  customRunner: async (sourceItems, sourceClient, destClient, idMaps, log) => {
+    // sourceItems will be empty array (no standalone fetch) — we iterate migrated listings instead
+    const results = { sourceCount: 0, migratedCount: 0, failedCount: 0, skippedCount: 0, errors: [] };
+
+    const listingIdPairs = Object.entries(idMaps.listings || {});
+    results.sourceCount = listingIdPairs.length;
+
+    for (const [sourceListingId, destListingId] of listingIdPairs) {
+      try {
+        log.info(`pricing_snapshot: fetching calendar for source listing ${sourceListingId}`);
+        const calendarDays = await sourceClient.getListingPricingCalendar(sourceListingId, 730);
+
+        if (!calendarDays || calendarDays.length === 0) {
+          results.skippedCount++;
+          continue;
+        }
+
+        // Map to { date, price, minNights } — skip days with no price
+        const updates = calendarDays
+          .filter(d => d.price != null || d.minNights != null)
+          .map(d => ({
+            date: d.date,
+            ...(d.price != null ? { price: d.price } : {}),
+            ...(d.minNights != null ? { minNights: d.minNights } : {}),
+          }));
+
+        if (updates.length === 0) {
+          results.skippedCount++;
+          continue;
+        }
+
+        await destClient.updateListingCalendarPricing(destListingId, updates);
+        results.migratedCount++;
+        log.info(`pricing_snapshot: applied ${updates.length} day overrides to dest listing ${destListingId}`);
+      } catch (err) {
+        results.failedCount++;
+        results.errors.push({
+          sourceListingId,
+          destListingId,
+          error: err.response?.data?.message || err.message,
+        });
+      }
+    }
+
+    return results;
+  },
+},
+```
+
+**Step B — Add `pricing_snapshot` to `MIGRATION_ORDER` AFTER `rate_strategies`:**
+
+```js
+const MIGRATION_ORDER = [
+  'custom_fields',
+  'fees',
+  'taxes',
+  'listings',
+  'rate_strategies',
+  'pricing_snapshot',  // ← opt-in calendar overlay, runs after rate_strategies
+  'guests',
+  'owners',
+  'saved_replies',
+  'reservations',
+  'automations',
+  'tasks',
+];
+```
+
+**Step C — Handle the `pricing_snapshot` getAll gracefully** since it has no standalone fetch. In the per-category loop in `runMigration()`, before calling `categoryDef.getAll()`, add:
+
+```js
+// pricing_snapshot has no independent data source — it operates on idMaps.listings
+if (category === 'pricing_snapshot' && categoryDef.customRunner) {
+  rawItems = [];
+}
+```
+
+Or more elegantly, make `getAll` optional: if `categoryDef.getAll` is undefined, set `rawItems = []`. Change the fetch block:
+
+```js
+let rawItems;
+try {
+  rawItems = categoryDef.getAll
+    ? await categoryDef.getAll(sourceClient)
+    : [];
+} catch (fetchErr) {
+  // ... existing error handling
+}
+```
+
+**Step D — Add `pricing_snapshot` to `getCategoryPath` with a sentinel path** (for the diff report count — it won't match a real API path, just skip counting):
+
+```js
+pricing_snapshot: null,  // no single API path — skip diff count
+```
+
+Then in the diff report loop, skip null paths:
+```js
+const sourcePath = getCategoryPath(category);
+if (!sourcePath) {
+  diffReport[category] = { source: results[category]?.sourceCount || 0, destination: results[category]?.migratedCount || 0, match: true, note: 'calendar overlay — count is listings processed' };
+  continue;
+}
+```
+
+---
+
+### 5. Wire `pricing_snapshot` through checkout and preflight
+
+**In `server/routes/migrations.js`:**
+
+In the `POST /api/migrations/:id/checkout` handler, `pricing_snapshot` should be treated as a premium add-on (not a base category). It is NOT included in the default `selectedCategories` list. When the user includes `'pricing_snapshot'` in their `addOns` array, it gets injected into `selectedCategories` before saving:
+
+```js
+// After validAddOns is computed, inject pricing_snapshot into selectedCategories if opted in
+const baseCats = selectedCategories || ['custom_fields', 'rate_strategies', 'fees', 'taxes', 'listings', 'guests', 'owners', 'saved_replies', 'reservations', 'automations', 'tasks'];
+const finalCategories = validAddOns.includes('pricing_snapshot')
+  ? [...baseCats, 'pricing_snapshot']
+  : baseCats;
+// Use finalCategories wherever selectedCategories was used in the UPDATE query
+```
+
+**In the preflight manifest** (`POST /api/migrations/preflight`), add a note about calendar snapshot availability:
+
+```js
+manifest = {
+  // ... existing fields
+  pricing_snapshot_available: true,  // always available — just requires opt-in
+};
+```
+
+---
+
+### 6. Add `pricing_snapshot` to `server/pricing.js` add-on map
+
+In `server/pricing.js` (wherever `getAddonPriceMap()` is defined), add:
+
+```js
+pricing_snapshot: 'STRIPE_ADDON_PRICING_SNAPSHOT',
+```
+
+And add the corresponding env var to `.env.example`:
+
+```
+STRIPE_ADDON_PRICING_SNAPSHOT=price_xxxxx
+```
+
+If you can't find `getAddonPriceMap()` in pricing.js, find where `ADDON_PRICE_MAP` is defined in `migrations.js` and add the entry there directly.
+
+---
+
+### 7. Fix `ALLOWED_EXTRA_COLUMNS` in `migrationEngine.js` to allow `pricing_mode` updates (already present — verify it includes `pricing_mode` and `results`)
+
+No change needed if `pricing_mode` and `results` are already in the set — just verify.
+
+---
+
+## IMPORTANT CONSTRAINTS
+
+- Do NOT modify any auth, payment, Stripe, or user management code.
+- Do NOT rename or remove any existing methods from GuestyClient — only add new ones.
+- Do NOT change existing working categories (fees, taxes, listings, guests, etc.) — the only change to existing categories is the MIGRATION_ORDER reorder and the rate_strategies replacement.
+- The `pricing_snapshot` add-on must be completely opt-in — it must NEVER run unless the user explicitly selected it.
+- All new GuestyClient methods must follow the existing pattern: use `this.request()`, handle 404 gracefully, and log warnings rather than throwing for non-fatal failures.
+- The calendar update chunks must be 90 days max to avoid hitting request body size limits.
+- After all changes, the existing Guesty-to-Guesty migration flow for all other categories must work identically to before.
+```

@@ -20,10 +20,11 @@ const STRIPE_PRICE_ENV_KEYS = {
 };
 
 const ADDON_DEFINITIONS = [
-  { key: 'priority',  name: 'Priority Processing',        description: 'Skip the queue — your migration runs first.',                              priceCents: 9900,  envKey: 'STRIPE_PRICE_ADDON_PRIORITY'  },
-  { key: 'support',   name: 'Dedicated Support & Review', description: 'A migration specialist reviews your setup and assists during the process.', priceCents: 14900, envKey: 'STRIPE_PRICE_ADDON_SUPPORT'   },
-  { key: 'remigrate', name: 'Re-Migration Pass',          description: 'One free re-run within 30 days if you need to migrate again.',              priceCents: 7900,  envKey: 'STRIPE_PRICE_ADDON_REMIGRATE' },
-  { key: 'verify',    name: 'Post-Migration Verify Call', description: '30-minute video call to walk through your destination account.',            priceCents: 9900,  envKey: 'STRIPE_PRICE_ADDON_VERIFY'    },
+  { key: 'priority',         name: 'Priority Processing',           description: 'Skip the queue — your migration runs first.',                              priceCents: 9900,  envKey: 'STRIPE_PRICE_ADDON_PRIORITY'          },
+  { key: 'support',          name: 'Dedicated Support & Review',    description: 'A migration specialist reviews your setup and assists during the process.', priceCents: 14900, envKey: 'STRIPE_PRICE_ADDON_SUPPORT'           },
+  { key: 'remigrate',        name: 'Re-Migration Pass',             description: 'One free re-run within 30 days if you need to migrate again.',              priceCents: 7900,  envKey: 'STRIPE_PRICE_ADDON_REMIGRATE'         },
+  { key: 'verify',           name: 'Post-Migration Verify Call',    description: '30-minute video call to walk through your destination account.',            priceCents: 9900,  envKey: 'STRIPE_PRICE_ADDON_VERIFY'            },
+  { key: 'pricing_snapshot', name: 'Pricing Calendar Snapshot',     description: 'Copy 2 years of nightly price + min-night overrides as hard calendar values.', priceCents: 14900, envKey: 'STRIPE_ADDON_PRICING_SNAPSHOT' },
 ];
 
 /**

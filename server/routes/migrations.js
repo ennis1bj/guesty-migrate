@@ -46,10 +46,11 @@ router.post('/preflight', async (req, res) => {
       const accountId = await sourceClient.getAccountId();
 
       // Fetch full listings (needed for photo count) and counts for the rest
-      const [customFields, fees, allListings, reservations, guests, owners, savedReplies, tasks] = await Promise.all([
+      const [customFields, fees, allListings, rateStrategies, reservations, guests, owners, savedReplies, tasks] = await Promise.all([
         sourceClient.getCount(`/accounts/${accountId}/custom-fields`),
         sourceClient.getCount('/additional-fees/account'),
         sourceClient.getAllListings(),
+        sourceClient.getCount('/revenue-management/rate-strategies'),
         sourceClient.getCount('/reservations'),
         sourceClient.getCount('/guests'),
         sourceClient.getCount('/owners'),
@@ -69,6 +70,7 @@ router.post('/preflight', async (req, res) => {
         custom_fields: customFields,
         fees,
         listings: allListings.length,
+        rate_strategies: rateStrategies,
         reservations,
         guests,
         owners,
@@ -84,6 +86,7 @@ router.post('/preflight', async (req, res) => {
           city:      l.address?.city || null,
           isActive:  l.active !== false,
         })),
+        pricing_snapshot_available: true,
       };
     } catch (err) {
       const details = err.response?.data?.message || err.message;
@@ -196,11 +199,16 @@ router.post('/:id/checkout', async (req, res) => {
     const betaUser = betaCheck.rows[0];
     if (betaUser?.is_beta && betaUser.beta_expires_at && new Date(betaUser.beta_expires_at) > new Date()) {
       // Beta user — skip payment, mark as paid, enqueue
+      const betaBaseCats = selectedCategories || ['custom_fields', 'fees', 'listings', 'rate_strategies', 'guests', 'owners', 'saved_replies', 'reservations', 'tasks'];
+      const betaAddOns = addOns || [];
+      const betaFinalCats = betaAddOns.includes('pricing_snapshot')
+        ? [...betaBaseCats, 'pricing_snapshot']
+        : betaBaseCats;
       await pool.query(
         `UPDATE migrations SET status = 'paid', selected_categories = $1, selected_addons = $2, pricing_mode = 'beta' WHERE id = $3`,
         [
-          selectedCategories || ['custom_fields', 'fees', 'listings', 'guests', 'owners', 'saved_replies', 'reservations', 'tasks'],
-          JSON.stringify(addOns || []),
+          betaFinalCats,
+          JSON.stringify(betaAddOns),
           id,
         ]
       );
@@ -270,6 +278,12 @@ router.post('/:id/checkout', async (req, res) => {
       metadata: { migrationId: id },
     });
 
+    // Build final category list — inject pricing_snapshot if opted in as an add-on
+    const baseCats = selectedCategories || ['custom_fields', 'fees', 'listings', 'rate_strategies', 'guests', 'owners', 'saved_replies', 'reservations', 'tasks'];
+    const finalCategories = validAddOns.includes('pricing_snapshot')
+      ? [...baseCats, 'pricing_snapshot']
+      : baseCats;
+
     // Persist session + selections
     await pool.query(
       `UPDATE migrations
@@ -280,7 +294,7 @@ router.post('/:id/checkout', async (req, res) => {
        WHERE id = $5`,
       [
         session.id,
-        selectedCategories || ['custom_fields', 'fees', 'listings', 'guests', 'owners', 'saved_replies', 'reservations', 'tasks'],
+        finalCategories,
         JSON.stringify(validAddOns),
         pricingMode,
         id,
@@ -466,10 +480,11 @@ router.post('/:id/demo-activate', async (req, res) => {
       return res.status(404).json({ error: 'Migration not found or already activated' });
     }
 
+    const demoBaseCats = selectedCategories || ['custom_fields', 'fees', 'listings', 'rate_strategies', 'guests', 'owners', 'saved_replies', 'reservations', 'tasks'];
     await pool.query(
       "UPDATE migrations SET status = 'paid', selected_categories = $1, selected_listing_ids = $2 WHERE id = $3",
       [
-        selectedCategories || ['custom_fields', 'fees', 'listings', 'guests', 'owners', 'saved_replies', 'reservations', 'tasks'],
+        demoBaseCats,
         selectedListingIds ? JSON.stringify(selectedListingIds) : null,
         id,
       ]

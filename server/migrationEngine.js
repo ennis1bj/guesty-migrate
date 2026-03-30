@@ -10,18 +10,24 @@ function extractPhotoUrl(pic) {
 
 function getCategoryPath(category) {
   const paths = {
-    listings:      '/listings',
-    guests:        '/guests',
-    owners:        '/owners',
-    saved_replies: '/saved-replies',
-    reservations:  '/reservations',
-    tasks:         '/tasks-open-api/tasks?columns=_id',
+    custom_fields:    null, // account-ID-dependent — handled by getCountForClient
+    fees:             null, // non-standard path — handled by getCountForClient
+    listings:         '/listings',
+    rate_strategies:  '/revenue-management/rate-strategies',
+    guests:           '/guests',
+    owners:           '/owners',
+    saved_replies:    '/saved-replies',
+    reservations:     '/reservations',
+    tasks:            null, // requires columns param — handled by getCountForClient
+    pricing_snapshot: null, // no single API path — operates on idMaps.listings
   };
-  return paths[category] || `/${category}`;
+  // Return null explicitly when in map (including intentional nulls), fall back to /${category} only for unknown
+  return Object.prototype.hasOwnProperty.call(paths, category) ? paths[category] : `/${category}`;
 }
 
 // Returns the correct count for a category, resolving account-ID-dependent
 // or param-required paths that cannot be expressed as a plain static path.
+// Returns null for categories with no meaningful count API (e.g. pricing_snapshot).
 async function getCountForClient(client, category) {
   if (category === 'custom_fields') {
     const id = await client.getAccountId();
@@ -29,7 +35,10 @@ async function getCountForClient(client, category) {
   }
   if (category === 'fees') return client.getCount('/additional-fees/account');
   if (category === 'tasks') return client.getCount('/tasks-open-api/tasks?columns=_id');
-  return client.getCount(getCategoryPath(category));
+  if (category === 'pricing_snapshot') return null; // no independent count
+  const path = getCategoryPath(category);
+  if (!path) return null;
+  return client.getCount(path);
 }
 
 const SOURCE_ONLY_FIELDS = new Set([
@@ -209,6 +218,114 @@ const CATEGORIES = {
       return cleaned;
     },
   },
+
+  rate_strategies: {
+    getAll: (client) => client.getAllRateStrategies(),
+    idField: '_id',
+    // No create — writes via listing update endpoints instead (POST endpoint confirmed non-existent)
+    customRunner: async (sourceItems, sourceClient, destClient, idMaps, log) => {
+      const results = { sourceCount: sourceItems.length, migratedCount: 0, failedCount: 0, skippedCount: 0, errors: [] };
+
+      for (const strategy of sourceItems) {
+        const listingIds = strategy.listingIds || (strategy.listingId ? [strategy.listingId] : []);
+        if (listingIds.length === 0) {
+          results.skippedCount++;
+          continue;
+        }
+
+        for (const sourceListingId of listingIds) {
+          const destListingId = idMaps.listings?.[sourceListingId];
+          if (!destListingId) {
+            results.skippedCount++;
+            continue;
+          }
+
+          try {
+            // Strategy 2: Apply base pricing fields from the strategy to the destination listing
+            const priceFields = {};
+            if (strategy.basePrice != null)         priceFields.basePrice = strategy.basePrice;
+            if (strategy.weekendBasePrice != null)   priceFields.weekendBasePrice = strategy.weekendBasePrice;
+            if (strategy.weeklyPriceFactor != null)  priceFields.weeklyPriceFactor = strategy.weeklyPriceFactor;
+            if (strategy.monthlyPriceFactor != null) priceFields.monthlyPriceFactor = strategy.monthlyPriceFactor;
+            if (strategy.currency)                   priceFields.currency = strategy.currency;
+
+            if (Object.keys(priceFields).length > 0) {
+              await destClient.updateListingPricing(destListingId, priceFields);
+            }
+
+            // Strategy 4: Apply day-of-week min nights and default min/max nights
+            const terms = {};
+            if (strategy.minNights != null)      terms.minNights = strategy.minNights;
+            if (strategy.maxNights != null)      terms.maxNights = strategy.maxNights;
+            if (strategy.minNightsByDow != null) terms.minNightsByDow = strategy.minNightsByDow;
+            if (Object.keys(terms).length > 0) {
+              await destClient.updateListingAvailabilitySettings(destListingId, { terms });
+            }
+
+            results.migratedCount++;
+          } catch (err) {
+            results.failedCount++;
+            results.errors.push({
+              sourceListingId,
+              destListingId,
+              strategyName: strategy.name,
+              error: err.response?.data?.message || err.message,
+            });
+          }
+        }
+      }
+
+      return results;
+    },
+  },
+
+  pricing_snapshot: {
+    // No getAll — data is fetched per-listing inside customRunner
+    idField: '_id',
+    customRunner: async (sourceItems, sourceClient, destClient, idMaps, log) => {
+      const results = { sourceCount: 0, migratedCount: 0, failedCount: 0, skippedCount: 0, errors: [] };
+      const listingIdPairs = Object.entries(idMaps.listings || {});
+      results.sourceCount = listingIdPairs.length;
+
+      for (const [sourceListingId, destListingId] of listingIdPairs) {
+        try {
+          log.info(`pricing_snapshot: fetching calendar for source listing ${sourceListingId}`);
+          const calendarDays = await sourceClient.getListingPricingCalendar(sourceListingId, 730);
+
+          if (!calendarDays || calendarDays.length === 0) {
+            results.skippedCount++;
+            continue;
+          }
+
+          const updates = calendarDays
+            .filter(d => d.price != null || d.minNights != null)
+            .map(d => ({
+              date: d.date,
+              ...(d.price != null ? { price: d.price } : {}),
+              ...(d.minNights != null ? { minNights: d.minNights } : {}),
+            }));
+
+          if (updates.length === 0) {
+            results.skippedCount++;
+            continue;
+          }
+
+          await destClient.updateListingCalendarPricing(destListingId, updates);
+          results.migratedCount++;
+          log.info(`pricing_snapshot: applied ${updates.length} day overrides to dest listing ${destListingId}`);
+        } catch (err) {
+          results.failedCount++;
+          results.errors.push({
+            sourceListingId,
+            destListingId,
+            error: err.response?.data?.message || err.message,
+          });
+        }
+      }
+
+      return results;
+    },
+  },
 };
 
 // Strict migration order for dependency resolution
@@ -216,6 +333,8 @@ const MIGRATION_ORDER = [
   'custom_fields',
   'fees',
   'listings',
+  'rate_strategies',   // after listings — needs idMaps.listings populated
+  'pricing_snapshot',  // opt-in calendar overlay, runs after rate_strategies
   'guests',
   'owners',
   'saved_replies',
@@ -321,7 +440,10 @@ async function runMigration(migrationId) {
       log.info(`Migrating ${category}...`);
       let rawItems;
       try {
-        rawItems = await categoryDef.getAll(sourceClient);
+        // getAll is optional — pricing_snapshot has no independent data source
+        rawItems = categoryDef.getAll
+          ? await categoryDef.getAll(sourceClient)
+          : [];
       } catch (fetchErr) {
         const status = fetchErr.response?.status;
         if (status === 404 || status === 400) {
@@ -356,6 +478,28 @@ async function runMigration(migrationId) {
           return !lid || migratedListingIds.has(lid);
         });
         log.info(`Pilot mode: scoped ${category} to ${sourceItems.length} items matching migrated listings`);
+      }
+
+      // If the category defines a customRunner, delegate entirely to it
+      if (categoryDef.customRunner) {
+        const customResult = await categoryDef.customRunner(
+          sourceItems, sourceClient, destClient, idMaps, log
+        );
+        results[category] = {
+          sourceCount:   customResult.sourceCount,
+          migratedCount: customResult.migratedCount,
+          failedCount:   customResult.failedCount,
+        };
+        if (customResult.failedCount > 0) hasFailures = true;
+        await logCategory(
+          migrationId, category,
+          customResult.failedCount === 0 ? 'complete' : 'partial',
+          customResult.sourceCount, customResult.migratedCount,
+          customResult.failedCount, customResult.skippedCount || 0,
+          customResult.errors?.length > 0 ? customResult.errors : null
+        );
+        await updateStatus(migrationId, 'running', { results });
+        continue; // skip the default create loop
       }
 
       const sourceCount = sourceItems.length;
@@ -502,11 +646,34 @@ async function runMigration(migrationId) {
     const categoryDef = CATEGORIES[category];
     if (!categoryDef) continue;
 
+    // Categories with no API count path (e.g. pricing_snapshot) get a synthetic entry
+    if (getCountForClient === null || category === 'pricing_snapshot') {
+      diffReport[category] = {
+        source:      results[category]?.sourceCount  || 0,
+        destination: results[category]?.migratedCount || 0,
+        match: true,
+        note: 'calendar overlay — count is listings processed',
+      };
+      continue;
+    }
+
     try {
       const [sourceCount, destCount] = await Promise.all([
         getCountForClient(sourceClient, category),
         getCountForClient(destClient, category),
       ]);
+
+      // null means the endpoint isn't available on this plan — skip count comparison
+      if (sourceCount === null || destCount === null) {
+        diffReport[category] = {
+          source:      results[category]?.sourceCount  || 0,
+          destination: results[category]?.migratedCount || 0,
+          match: true,
+          note: 'count endpoint not available on this plan',
+        };
+        continue;
+      }
+
       diffReport[category] = {
         source: sourceCount,
         destination: destCount,
