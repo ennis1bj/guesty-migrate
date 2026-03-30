@@ -113,7 +113,9 @@ function getTierLabel(count: number): string {
 export default function Migrate() {
   const { user } = useAuth();
   const isDemo = !!user?.is_demo;
-  const isBeta = !!(user as any)?.is_beta;
+  const isBeta = !!(user as any)?.is_beta &&
+    !!(user as any)?.beta_expires_at &&
+    new Date((user as any)?.beta_expires_at) > new Date();
   const [searchParams] = useSearchParams();
   const [currentStep, setCurrentStep] = useState(0);
   const [migrationId, setMigrationId] = useState<string | null>(null);

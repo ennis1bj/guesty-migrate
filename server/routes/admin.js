@@ -69,7 +69,8 @@ router.post('/beta/grant', async (req, res) => {
     const starts = startsAt || new Date().toISOString();
 
     await pool.query(
-      `UPDATE users SET is_beta = true, beta_starts_at = $1, beta_expires_at = $2, beta_notes = $3 WHERE id = $4`,
+      `UPDATE users SET is_beta = true, beta_starts_at = $1, beta_expires_at = $2, beta_notes = $3,
+       email_verified = true, verify_token = NULL, verify_token_expires = NULL WHERE id = $4`,
       [starts, expiresAt, notes || null, userId]
     );
 
