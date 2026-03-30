@@ -399,14 +399,26 @@ async function loadPreviousResults(migrationId) {
 async function runMigration(migrationId) {
   const log = logger.child({ migrationId });
   try {
+  // Atomically claim the migration by transitioning paid→running.
+  // If another worker already claimed it (status is no longer 'paid'), bail out
+  // safely — this prevents duplicate concurrent runs when a paid migration is
+  // re-enqueued for recovery.
+  const claimResult = await pool.query(
+    "UPDATE migrations SET status = 'running' WHERE id = $1 AND status = 'paid' RETURNING id",
+    [migrationId]
+  );
+  if (claimResult.rowCount === 0) {
+    // Either migration not found or already running/completed — nothing to do.
+    log.warn('Migration claim failed — already claimed or not found, skipping');
+    return;
+  }
+
   const migResult = await pool.query('SELECT * FROM migrations WHERE id = $1', [migrationId]);
   if (migResult.rows.length === 0) throw new Error(`Migration ${migrationId} not found`);
 
   const migration = migResult.rows[0];
 
   const previousResults = await loadPreviousResults(migrationId);
-
-  await updateStatus(migrationId, 'running');
 
   const sourceClient = new GuestyClient({
     clientId: decrypt(migration.source_client_id),

@@ -232,17 +232,35 @@ function runMigrationInProcess(migrationId, priority) {
 async function recoverStuckMigrations() {
   try {
     const { pool } = require('./db');
-    const result = await pool.query(
+
+    // ── 1. Mark long-running migrations as failed ──────────────────────────
+    // Migrations stuck in 'running' for over an hour are orphaned — the engine
+    // crashed mid-run.  Mark them failed so the user can retry.
+    const runningResult = await pool.query(
       "SELECT id FROM migrations WHERE status = 'running' AND created_at < NOW() - INTERVAL '1 hour'"
     );
-    for (const row of result.rows) {
-      logger.info(`Recovering stuck migration ${row.id}`);
+    for (const row of runningResult.rows) {
+      logger.info(`Recovering stuck running migration ${row.id}`);
       await pool.query(
         "UPDATE migrations SET status = 'failed', error_message = 'Server restarted during migration' WHERE id = $1",
         [row.id]
       );
     }
-    logger.info(`Recovered ${result.rows.length} stuck migrations`);
+
+    // ── 2. Re-enqueue paid migrations that were never picked up ────────────
+    // A migration in 'paid' status for more than 10 minutes means the BullMQ
+    // worker never claimed it (e.g. due to a Redis connection blip at startup
+    // or a server restart after enqueuing).  Re-enqueue them so they run.
+    const paidResult = await pool.query(
+      "SELECT id, pricing_mode FROM migrations WHERE status = 'paid' AND created_at < NOW() - INTERVAL '10 minutes'"
+    );
+    for (const row of paidResult.rows) {
+      const priority = row.pricing_mode === 'beta' ? 1 : 10;
+      logger.info(`Re-enqueueing stuck paid migration ${row.id}`, { priority });
+      await enqueueMigration(row.id, { priority });
+    }
+
+    logger.info(`Recovered ${runningResult.rows.length} stuck running migration(s), re-enqueued ${paidResult.rows.length} stuck paid migration(s)`);
   } catch (err) {
     logger.error('Failed to recover stuck migrations', { error: err.message });
   }
