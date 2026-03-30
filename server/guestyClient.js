@@ -267,9 +267,18 @@ class GuestyClient {
       const all = await this.getAllPaginated(path, 'results');
       return all.length;
     } catch (err) {
+      const status = err.response?.status;
+      // 404/400 means the endpoint is not available on this account's plan.
+      // Return null so callers can distinguish "unavailable" from "zero records".
+      if (status === 404 || status === 400) {
+        logger.info('getCount: endpoint unavailable on this plan — returning null', {
+          path, status,
+        });
+        return null;
+      }
       logger.warn('getCount failed — returning 0', {
         path,
-        status: err.response?.status,
+        status,
         error: err.response?.data?.message || err.message,
       });
       return 0;

@@ -92,7 +92,7 @@ export default function Migrate() {
   const [destClientId, setDestClientId] = useState('');
   const [destClientSecret, setDestClientSecret] = useState('');
 
-  const [manifest, setManifest] = useState<Record<string, number> | null>(null);
+  const [manifest, setManifest] = useState<Record<string, number | null> | null>(null);
   const [selectedCategories, setSelectedCategories] = useState<string[]>(ALL_CATEGORIES);
   const [pricing, setPricing] = useState<Pricing | null>(null);
 
@@ -131,6 +131,7 @@ export default function Migrate() {
         .then(({ data }) => {
           setMigrationId(data.migrationId);
           setManifest(data.manifest);
+          applyManifestToCategories(data.manifest);
           setPricing(data.pricing);
           if (data.manifest?.listingDetails) {
             setAllListingIds((data.manifest.listingDetails as ListingDetail[]).map((l) => l.id));
@@ -200,6 +201,7 @@ export default function Migrate() {
       });
       setMigrationId(data.migrationId);
       setManifest(data.manifest);
+      applyManifestToCategories(data.manifest);
       setPricing(data.pricing);
       // Store listing IDs for pilot mode
       if (data.manifest?.listingDetails) {
@@ -275,6 +277,10 @@ export default function Migrate() {
     }
   };
 
+  const applyManifestToCategories = (m: Record<string, number | null>) => {
+    setSelectedCategories(ALL_CATEGORIES.filter((cat) => m[cat] !== null && m[cat] !== undefined));
+  };
+
   const toggleCategory = (category: string) => {
     setSelectedCategories((prev) =>
       prev.includes(category) ? prev.filter((c) => c !== category) : [...prev, category]
@@ -290,7 +296,7 @@ export default function Migrate() {
   const formatPrice = (cents: number) => `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 
   const flatCents = pricing?.amountCents || 0;
-  const perListingCents = manifest ? calculatePerListingCents(manifest.listings) : 0;
+  const perListingCents = manifest ? calculatePerListingCents(manifest.listings ?? 0) : 0;
   const addonTotal = selectedAddOns.reduce((sum, key) => {
     const a = ADD_ONS.find((ao) => ao.key === key);
     return sum + (a?.priceCents || 0);
@@ -508,7 +514,7 @@ export default function Migrate() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
               <p className="text-sm text-sky-800">
-                <strong>{manifest.photos.toLocaleString()} photos</strong> found across
+                <strong>{(manifest.photos ?? 0).toLocaleString()} photos</strong> found across
                 all listings — native listing photos will be migrated automatically
                 when Listings is selected. Channel-connected listing photos re-sync
                 when you reconnect channels. Calendar blocks are also transferred
@@ -524,7 +530,7 @@ export default function Migrate() {
           </div>
 
           {/* Pilot Mode Listing Picker */}
-          {manifest.listings > 0 && selectedCategories.includes('listings') && (
+          {(manifest.listings ?? 0) > 0 && selectedCategories.includes('listings') && (
             <div className="mt-6 p-5 bg-white border border-stone-200 rounded-xl">
               <div className="flex items-center justify-between mb-4">
                 <div>
@@ -711,22 +717,22 @@ export default function Migrate() {
                 <table className="w-full text-left">
                   <tbody className="text-slate-600">
                     <tr><td className="py-0.5">Base fee</td><td className="text-right font-medium">$79.00</td></tr>
-                    {manifest.listings > 0 && (
+                    {(manifest.listings ?? 0) > 0 && (
                       <tr>
-                        <td className="py-0.5">Listings 1–{Math.min(manifest.listings, 50)} @ $8.00</td>
-                        <td className="text-right font-medium">${(Math.min(manifest.listings, 50) * 8).toFixed(2)}</td>
+                        <td className="py-0.5">Listings 1–{Math.min(manifest.listings ?? 0, 50)} @ $8.00</td>
+                        <td className="text-right font-medium">${(Math.min(manifest.listings ?? 0, 50) * 8).toFixed(2)}</td>
                       </tr>
                     )}
-                    {manifest.listings > 50 && (
+                    {(manifest.listings ?? 0) > 50 && (
                       <tr>
-                        <td className="py-0.5">Listings 51–{Math.min(manifest.listings, 200)} @ $5.00</td>
-                        <td className="text-right font-medium">${(Math.min(Math.max(manifest.listings - 50, 0), 150) * 5).toFixed(2)}</td>
+                        <td className="py-0.5">Listings 51–{Math.min(manifest.listings ?? 0, 200)} @ $5.00</td>
+                        <td className="text-right font-medium">${(Math.min(Math.max((manifest.listings ?? 0) - 50, 0), 150) * 5).toFixed(2)}</td>
                       </tr>
                     )}
-                    {manifest.listings > 200 && (
+                    {(manifest.listings ?? 0) > 200 && (
                       <tr>
-                        <td className="py-0.5">Listings 201–{manifest.listings} @ $3.00</td>
-                        <td className="text-right font-medium">${(Math.max(manifest.listings - 200, 0) * 3).toFixed(2)}</td>
+                        <td className="py-0.5">Listings 201–{manifest.listings ?? 0} @ $3.00</td>
+                        <td className="text-right font-medium">${(Math.max((manifest.listings ?? 0) - 200, 0) * 3).toFixed(2)}</td>
                       </tr>
                     )}
                     <tr className="border-t border-stone-200">

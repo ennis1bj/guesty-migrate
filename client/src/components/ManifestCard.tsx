@@ -1,5 +1,5 @@
 interface ManifestCardProps {
-  manifest: Record<string, number>;
+  manifest: Record<string, number | null>;
   selectedCategories: string[];
   onToggleCategory: (category: string) => void;
 }
@@ -20,20 +20,24 @@ export default function ManifestCard({ manifest, selectedCategories, onToggleCat
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       {Object.entries(manifest).map(([category, count]) => {
-        const selected = selectedCategories.includes(category);
+        const unavailable = count === null;
+        const selected = !unavailable && selectedCategories.includes(category);
         return (
           <button
             key={category}
-            onClick={() => onToggleCategory(category)}
+            onClick={() => !unavailable && onToggleCategory(category)}
+            disabled={unavailable}
             className={`p-4 rounded-2xl border-2 text-left transition-all duration-200 ${
-              selected
-                ? 'border-amber-500 bg-amber-50 shadow-sm'
-                : 'border-stone-200 bg-white hover:border-stone-300'
+              unavailable
+                ? 'border-stone-100 bg-stone-50 cursor-not-allowed opacity-60'
+                : selected
+                  ? 'border-amber-500 bg-amber-50 shadow-sm'
+                  : 'border-stone-200 bg-white hover:border-stone-300'
             }`}
           >
             <div className="flex items-center justify-between mb-2">
               <svg
-                className={`w-6 h-6 ${selected ? 'text-amber-600' : 'text-slate-400'}`}
+                className={`w-6 h-6 ${unavailable ? 'text-stone-300' : selected ? 'text-amber-600' : 'text-slate-400'}`}
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -41,24 +45,36 @@ export default function ManifestCard({ manifest, selectedCategories, onToggleCat
               >
                 <path strokeLinecap="round" strokeLinejoin="round" d={CATEGORY_ICONS[category] || CATEGORY_ICONS.tasks} />
               </svg>
-              <div
-                className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all duration-200 ${
-                  selected ? 'bg-amber-500 border-amber-500' : 'border-stone-300'
-                }`}
-              >
-                {selected && (
-                  <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                    <path
-                      fillRule="evenodd"
-                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                )}
-              </div>
+              {unavailable ? (
+                <span className="text-xs font-medium text-stone-400 bg-stone-100 px-2 py-0.5 rounded-full">
+                  Not available
+                </span>
+              ) : (
+                <div
+                  className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all duration-200 ${
+                    selected ? 'bg-amber-500 border-amber-500' : 'border-stone-300'
+                  }`}
+                >
+                  {selected && (
+                    <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                      <path
+                        fillRule="evenodd"
+                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  )}
+                </div>
+              )}
             </div>
-            <h3 className="text-lg font-bold capitalize text-slate-900">{category.replace(/_/g, ' ')}</h3>
-            <p className="text-2xl font-extrabold text-amber-500">{count.toLocaleString()}</p>
+            <h3 className={`text-lg font-bold capitalize ${unavailable ? 'text-stone-400' : 'text-slate-900'}`}>
+              {category.replace(/_/g, ' ')}
+            </h3>
+            {unavailable ? (
+              <p className="text-sm text-stone-400 mt-1">Not included in your Guesty plan</p>
+            ) : (
+              <p className="text-2xl font-extrabold text-amber-500">{(count as number).toLocaleString()}</p>
+            )}
           </button>
         );
       })}

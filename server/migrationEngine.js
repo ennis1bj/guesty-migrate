@@ -363,7 +363,22 @@ async function runMigration(migrationId) {
 
     try {
       log.info(`Migrating ${category}...`);
-      let sourceItems = await categoryDef.getAll(sourceClient);
+      let rawItems;
+      try {
+        rawItems = await categoryDef.getAll(sourceClient);
+      } catch (fetchErr) {
+        const status = fetchErr.response?.status;
+        if (status === 404 || status === 400) {
+          // Endpoint not available on this account's plan — treat as empty.
+          log.info(`Category ${category} not available on this Guesty plan (HTTP ${status}) — skipping`, { status });
+          results[category] = { sourceCount: 0, migratedCount: 0, failedCount: 0 };
+          await logCategory(migrationId, category, 'complete', 0, 0, 0, 0, null);
+          await updateStatus(migrationId, 'running', { results });
+          continue;
+        }
+        throw fetchErr; // re-throw non-plan errors to the outer catch
+      }
+      let sourceItems = rawItems;
       // Apply custom sort order if defined (e.g., complex listing hierarchy)
       if (categoryDef.sortItems) {
         sourceItems = categoryDef.sortItems(sourceItems);
