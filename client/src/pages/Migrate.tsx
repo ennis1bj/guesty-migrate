@@ -101,6 +101,7 @@ export default function Migrate() {
   const [allListingIds, setAllListingIds] = useState<string[]>([]);
 
   const [loading, setLoading] = useState(false);
+  const [resumeLoading, setResumeLoading] = useState(false);
   const [error, setError] = useState('');
   const [channelConfirmed, setChannelConfirmed] = useState(false);
   const [showQuoteModal, setShowQuoteModal] = useState(false);
@@ -110,9 +111,28 @@ export default function Migrate() {
   useEffect(() => {
     const step = searchParams.get('step');
     const id = searchParams.get('migrationId');
+
     if (step === 'progress' && id) {
       setMigrationId(id);
       setCurrentStep(3);
+      return;
+    }
+
+    if (step === 'review' && id) {
+      setResumeLoading(true);
+      api
+        .get(`/migrations/${id}/resume`)
+        .then(({ data }) => {
+          setMigrationId(data.migrationId);
+          setManifest(data.manifest);
+          setPricing(data.pricing);
+          setCurrentStep(1);
+        })
+        .catch(() => {
+          setError('That setup could not be resumed. Please start a new migration.');
+        })
+        .finally(() => setResumeLoading(false));
+      return;
     }
   }, [searchParams]);
 
@@ -285,6 +305,15 @@ export default function Migrate() {
   };
 
   const isTerminal = migrationStatus && ['complete', 'complete_with_errors', 'failed'].includes(migrationStatus.status);
+
+  if (resumeLoading) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-16 text-center">
+        <div className="animate-spin w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full mx-auto mb-4" />
+        <p className="text-slate-500 text-sm">Loading your previous setup…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">

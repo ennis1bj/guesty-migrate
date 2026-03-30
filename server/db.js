@@ -233,4 +233,19 @@ const purgeExpiredCredentials = async () => {
   }
 };
 
-module.exports = { pool, migrate, purgeExpiredCredentials };
+const purgeStalePendingMigrations = async () => {
+  try {
+    const result = await pool.query(
+      `DELETE FROM migrations
+       WHERE status = 'pending'
+         AND created_at < NOW() - INTERVAL '24 hours'`
+    );
+    if (result.rowCount > 0) {
+      console.log(`Purged ${result.rowCount} stale pending migration(s)`);
+    }
+  } catch (err) {
+    console.error('Failed to purge stale pending migrations:', err.message);
+  }
+};
+
+module.exports = { pool, migrate, purgeExpiredCredentials, purgeStalePendingMigrations };

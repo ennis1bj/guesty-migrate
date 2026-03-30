@@ -20,7 +20,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
-const { pool, migrate, purgeExpiredCredentials } = require('./db');
+const { pool, migrate, purgeExpiredCredentials, purgeStalePendingMigrations } = require('./db');
 const { initQueue, recoverStuckMigrations, getQueueHealth } = require('./queue');
 const { logger, requestIdMiddleware } = require('./logger');
 
@@ -171,6 +171,10 @@ async function start() {
 
     // Purge credentials from completed migrations older than 30 days
     await purgeExpiredCredentials();
+
+    // Delete pending migrations that were never confirmed (older than 24h)
+    await purgeStalePendingMigrations();
+    setInterval(purgeStalePendingMigrations, 60 * 60 * 1000);
 
     // Recover any stuck migrations from before restart
     await recoverStuckMigrations();

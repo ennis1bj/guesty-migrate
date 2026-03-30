@@ -14,8 +14,15 @@ interface Migration {
   completed_at: string | null;
 }
 
+const statusLabel: Record<string, string> = {
+  paid: 'Awaiting Migration',
+  running: 'Running',
+  complete: 'Complete',
+  complete_with_errors: 'Complete with Errors',
+  failed: 'Failed',
+};
+
 const statusStyles: Record<string, string> = {
-  pending: 'bg-stone-100 text-slate-700',
   paid: 'bg-sky-100 text-sky-800',
   running: 'bg-amber-100 text-amber-800',
   complete: 'bg-emerald-100 text-emerald-800',
@@ -31,6 +38,8 @@ export default function Dashboard() {
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [resendStatus, setResendStatus] = useState<'idle' | 'loading' | 'sent' | 'error'>('idle');
   const [resendError, setResendError] = useState('');
+  const [discardingId, setDiscardingId] = useState<string | null>(null);
+  const [confirmDiscardId, setConfirmDiscardId] = useState<string | null>(null);
 
   const handleRetry = async (migrationId: string) => {
     try {
@@ -53,6 +62,19 @@ export default function Dashboard() {
     }
   };
 
+  const handleDiscard = async (migrationId: string) => {
+    setDiscardingId(migrationId);
+    try {
+      await api.delete(`/migrations/${migrationId}`);
+      setMigrations((prev) => prev.filter((m) => m.id !== migrationId));
+    } catch (err) {
+      console.error('Discard failed:', err);
+    } finally {
+      setDiscardingId(null);
+      setConfirmDiscardId(null);
+    }
+  };
+
   useEffect(() => {
     api
       .get('/migrations')
@@ -68,6 +90,9 @@ export default function Dashboard() {
       </div>
     );
   }
+
+  const pendingMigrations = migrations.filter((m) => m.status === 'pending');
+  const activeMigrations = migrations.filter((m) => m.status !== 'pending');
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -127,7 +152,77 @@ export default function Dashboard() {
         </Link>
       </div>
 
-      {migrations.length === 0 ? (
+      {/* Incomplete setup section */}
+      {pendingMigrations.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3">Incomplete Setup</h2>
+          <div className="space-y-3">
+            {pendingMigrations.map((m) => (
+              <div
+                key={m.id}
+                className="bg-amber-50 border border-amber-200 rounded-2xl p-5"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-amber-900">
+                      Setup started{' '}
+                      {new Date(m.created_at).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                      {m.manifest?.listings != null && (
+                        <span className="font-normal text-amber-700 ml-1">
+                          &mdash; {m.manifest.listings} {m.manifest.listings === 1 ? 'listing' : 'listings'} found
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-xs text-amber-600 mt-0.5 font-mono">{m.id}</p>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    {confirmDiscardId === m.id ? (
+                      <>
+                        <span className="text-xs text-amber-800">Discard this setup?</span>
+                        <button
+                          onClick={() => handleDiscard(m.id)}
+                          disabled={discardingId === m.id}
+                          className="text-xs font-semibold text-red-600 hover:text-red-700 disabled:opacity-60"
+                        >
+                          {discardingId === m.id ? 'Discarding…' : 'Yes, discard'}
+                        </button>
+                        <button
+                          onClick={() => setConfirmDiscardId(null)}
+                          className="text-xs text-slate-500 hover:text-slate-700"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => setConfirmDiscardId(m.id)}
+                          className="text-xs text-slate-500 hover:text-red-600 transition-colors font-medium"
+                        >
+                          Discard
+                        </button>
+                        <Link
+                          to={`/migrate?step=review&migrationId=${m.id}`}
+                          className="bg-amber-500 hover:bg-amber-600 text-slate-900 px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors"
+                        >
+                          Resume Setup
+                        </Link>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {activeMigrations.length === 0 && pendingMigrations.length === 0 ? (
         <div className="bg-white rounded-2xl shadow-sm border border-stone-200 p-12 text-center">
           <div className="w-16 h-16 bg-stone-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <svg className="w-8 h-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -143,17 +238,17 @@ export default function Dashboard() {
             Start Migration
           </Link>
         </div>
-      ) : (
+      ) : activeMigrations.length === 0 ? null : (
         <div className="space-y-4">
-          {migrations.map((m) => (
+          {activeMigrations.map((m) => (
             <div
               key={m.id}
               className="bg-white rounded-2xl shadow-sm border border-stone-200 p-6 hover:shadow-md hover:border-stone-300 transition-all duration-200"
             >
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center space-x-3">
-                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${statusStyles[m.status] || statusStyles.pending}`}>
-                    {m.status}
+                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${statusStyles[m.status] || 'bg-stone-100 text-slate-700'}`}>
+                    {statusLabel[m.status] || m.status}
                   </span>
                   <span className="text-sm text-slate-400">
                     {new Date(m.created_at).toLocaleDateString('en-US', {
@@ -185,7 +280,7 @@ export default function Dashboard() {
               </div>
 
               <p className="text-base font-semibold text-slate-900 mb-1">
-                Migration #{migrations.length - migrations.indexOf(m)} &mdash;{' '}
+                Migration #{activeMigrations.length - activeMigrations.indexOf(m)} &mdash;{' '}
                 {new Date(m.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
                 {m.manifest?.listings != null && (
                   <span className="text-slate-400 font-normal text-sm ml-2">

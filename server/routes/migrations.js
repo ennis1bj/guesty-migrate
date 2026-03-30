@@ -298,6 +298,50 @@ router.post('/:id/checkout', async (req, res) => {
   }
 });
 
+// ── GET /api/migrations/:id/resume ──────────────────────────────────────────
+// Returns the manifest + pricing for a pending migration so the Review step
+// can be pre-populated without re-entering credentials.
+
+router.get('/:id/resume', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `SELECT id, manifest FROM migrations WHERE id = $1 AND user_id = $2 AND status = 'pending'`,
+      [id, req.user.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Pending migration not found' });
+    }
+    const { manifest } = result.rows[0];
+    const pricing = getTierFromListings(manifest?.listings ?? 0);
+    res.json({ migrationId: id, manifest, pricing });
+  } catch (err) {
+    logger.error('Resume migration error', { error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ── DELETE /api/migrations/:id ───────────────────────────────────────────────
+// Allows a user to discard their own pending migration.
+
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `DELETE FROM migrations WHERE id = $1 AND user_id = $2 AND status = 'pending' RETURNING id`,
+      [id, req.user.id]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Pending migration not found' });
+    }
+    OperatorDeck.event('migration.discarded', { migrationId: id, userId: req.user.id });
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Delete migration error', { error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ── GET /api/migrations/:id/status ──────────────────────────────────────────
 
 router.get('/:id/status', async (req, res) => {
