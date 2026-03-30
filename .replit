@@ -9,7 +9,7 @@ channel = "stable-25_05"
 [userenv]
 
 [userenv.shared]
-FRONTEND_URL = "http://0.0.0.0:5000"
+FRONTEND_URL = "https://guestymigrate.com"
 NODE_ENV = "development"
 FROM_EMAIL = "noreply@guestymigrate.com"
 
