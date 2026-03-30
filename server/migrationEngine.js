@@ -119,6 +119,16 @@ const CATEGORIES = {
     create: (client, data) => client.createListing(data),
     idField: '_id',
     /**
+     * Channel-managed listings (Airbnb, Vrbo, Booking.com, etc.) cannot be
+     * created via the Guesty Open API — they must be reconnected through the
+     * OTA channel integration in the destination account. Skip them here so
+     * they show as 'skipped' rather than 'failed'.
+     */
+    filter: (item) => !(
+      Array.isArray(item.integrations) &&
+      item.integrations.some(i => i && (i.channelName || i.platform || i.channel))
+    ),
+    /**
      * Custom ordering: standalone first, then parents, then sub-units.
      * This ensures parentId can be remapped for sub-units.
      */
@@ -642,6 +652,7 @@ async function runMigration(migrationId) {
         sourceCount,
         migratedCount,
         failedCount,
+        ...(skippedCount > 0 ? { skippedCount } : {}),
         ...(errors.length > 0 ? { errors: errors.slice(0, 20) } : {}),
       };
 
