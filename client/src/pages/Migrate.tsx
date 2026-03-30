@@ -592,8 +592,259 @@ export default function Migrate() {
         </div>
       )}
 
+      {/* Step 2: Select Listings */}
+      {currentStep === 2 && manifest && (() => {
+        const allDetails = ((manifest as Record<string, unknown>).listingDetails as ListingDetail[] | undefined) ?? [];
+        const uniqueCities = [...new Set(allDetails.map(l => l.city).filter((c): c is string => !!c))].sort();
+        const q = listingSearch.toLowerCase().trim();
+        const filtered = allDetails.filter(l => {
+          if (q && !`${l.title ?? ''} ${l.nickname ?? ''} ${l.city ?? ''} ${l.type ?? ''} ${l.id}`.toLowerCase().includes(q)) return false;
+          if (filterStatus === 'active' && l.isActive === false) return false;
+          if (filterStatus === 'inactive' && l.isActive !== false) return false;
+          if (filterType === 'STL' && l.type !== 'STL') return false;
+          if (filterType === 'MTL' && l.type !== 'MTL') return false;
+          if (filterType === 'ROOM' && l.type !== 'ROOM') return false;
+          if (filterCity && l.city !== filterCity) return false;
+          return true;
+        });
+        const sortFn = (a: ListingDetail, b: ListingDetail): number => {
+          switch (sortBy) {
+            case 'name-asc': return (a.title ?? '').localeCompare(b.title ?? '');
+            case 'name-desc': return (b.title ?? '').localeCompare(a.title ?? '');
+            case 'city': return (a.city ?? '').localeCompare(b.city ?? '');
+            case 'type': return (a.type ?? '').localeCompare(b.type ?? '');
+            case 'status': return a.isActive === b.isActive ? 0 : (a.isActive ? -1 : 1);
+            default: return 0;
+          }
+        };
+        const sorted = [...filtered].sort(sortFn);
+        const mtlIdSet = new Set(allDetails.filter(l => l.type === 'MTL').map(l => l.id));
+        const seenIds = new Set<string>();
+        type Group = { parent: ListingDetail; rooms: ListingDetail[] };
+        const groups: Group[] = [];
+        const standalone: ListingDetail[] = [];
+        for (const l of sorted) {
+          if (l.type === 'MTL' && !seenIds.has(l.id)) {
+            const rooms = sorted.filter(r => r.complexId === l.id && !seenIds.has(r.id));
+            groups.push({ parent: l, rooms });
+            seenIds.add(l.id);
+            rooms.forEach(r => seenIds.add(r.id));
+          }
+        }
+        for (const l of sorted) {
+          if (!seenIds.has(l.id) && l.complexId && mtlIdSet.has(l.complexId)) {
+            const parent = allDetails.find(p => p.id === l.complexId);
+            if (parent) {
+              const existingGroup = groups.find(g => g.parent.id === l.complexId);
+              if (existingGroup) existingGroup.rooms.push(l);
+              else groups.push({ parent, rooms: [l] });
+              seenIds.add(l.id);
+            }
+          }
+        }
+        for (const l of sorted) {
+          if (!seenIds.has(l.id)) { standalone.push(l); seenIds.add(l.id); }
+        }
+        const filteredIds = filtered.map(l => l.id);
+        const allFilteredSelected = filteredIds.length > 0 && filteredIds.every(id => selectedListingIds.includes(id));
+        const someFilteredSelected = filteredIds.some(id => selectedListingIds.includes(id));
+        const toggleGroup = (group: Group) => {
+          const groupIds = [group.parent.id, ...group.rooms.map(r => r.id)];
+          const allGroupSelected = groupIds.every(id => selectedListingIds.includes(id));
+          setSelectedListingIds(prev => allGroupSelected ? prev.filter(id => !groupIds.includes(id)) : Array.from(new Set([...prev, ...groupIds])));
+        };
+        const typeBadge = (l: ListingDetail) => {
+          if (l.type === 'MTL') return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 flex-shrink-0">Multi-Unit</span>;
+          if (l.type === 'ROOM') return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 flex-shrink-0">Room</span>;
+          return null;
+        };
+        const ListingRow = ({ listing, indent = false }: { listing: ListingDetail; indent?: boolean }) => (
+          <label className={`flex items-center gap-3 px-3 py-2.5 hover:bg-stone-50 cursor-pointer border-b border-stone-100 last:border-0 ${indent ? 'pl-8 bg-stone-50/40' : ''} ${listing.isActive === false ? 'opacity-60' : ''}`}>
+            <input type="checkbox" checked={selectedListingIds.includes(listing.id)}
+              onChange={() => setSelectedListingIds(prev => prev.includes(listing.id) ? prev.filter(id => id !== listing.id) : [...prev, listing.id])}
+              className="w-4 h-4 text-amber-500 rounded border-stone-300 focus:ring-amber-500/30 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-sm text-slate-700 truncate">{listing.title}</span>
+                {typeBadge(listing)}
+                {listing.isActive === false && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-stone-100 text-stone-500 flex-shrink-0">Inactive</span>}
+              </div>
+              <p className="text-xs text-slate-400 truncate mt-0.5">
+                {[listing.nickname !== listing.title ? listing.nickname : null, listing.city, listing.state].filter(Boolean).join(' · ')}
+              </p>
+            </div>
+            <span className="text-xs text-slate-400 flex-shrink-0 font-mono">{listing.id.slice(-8)}</span>
+          </label>
+        );
+        const summaryTier = getTierLabel(selectedListingIds.length);
+        const summaryFlat = getTierFlatCents(selectedListingIds.length);
+        const summaryPerListing = calculatePerListingCents(selectedListingIds.length);
+        const summaryRequiresQuote = selectedListingIds.length > 500;
+        const effectivePrice = Math.min(summaryFlat, summaryPerListing);
+        const filtersActive = !!(q || filterStatus !== 'all' || filterType !== 'all' || filterCity);
+        return (
+          <div className="bg-white rounded-2xl shadow-sm border border-stone-200">
+            <div className="p-8 pb-4">
+              <h2 className="text-xl font-bold text-slate-900 mb-1">Select Listings to Migrate</h2>
+              <p className="text-slate-500 text-sm">All listings are selected by default. Uncheck any you want to exclude. Reservations, tasks, and saved replies will be automatically scoped to your selected listings.</p>
+            </div>
+            <div className="px-8 py-4 border-t border-stone-100">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="relative sm:col-span-2 lg:col-span-1">
+                  <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+                  </svg>
+                  <input type="text" value={listingSearch} onChange={e => setListingSearch(e.target.value)} placeholder="Search name, city, ID…"
+                    className="w-full pl-9 pr-8 py-2 text-sm border border-stone-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400/50 bg-[#fafaf8]" />
+                  {listingSearch && (
+                    <button onClick={() => setListingSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                  )}
+                </div>
+                <select value={filterStatus} onChange={e => setFilterStatus(e.target.value as 'all' | 'active' | 'inactive')}
+                  className="py-2 px-3 text-sm border border-stone-200 rounded-lg bg-[#fafaf8] focus:outline-none focus:ring-2 focus:ring-amber-400/50 text-slate-700">
+                  <option value="all">All statuses</option>
+                  <option value="active">Active only</option>
+                  <option value="inactive">Inactive only</option>
+                </select>
+                <select value={filterType} onChange={e => setFilterType(e.target.value as 'all' | 'STL' | 'MTL' | 'ROOM')}
+                  className="py-2 px-3 text-sm border border-stone-200 rounded-lg bg-[#fafaf8] focus:outline-none focus:ring-2 focus:ring-amber-400/50 text-slate-700">
+                  <option value="all">All types</option>
+                  <option value="STL">Short-term (STL)</option>
+                  <option value="MTL">Multi-unit (MTL)</option>
+                  <option value="ROOM">Rooms</option>
+                </select>
+                <select value={filterCity} onChange={e => setFilterCity(e.target.value)}
+                  className="py-2 px-3 text-sm border border-stone-200 rounded-lg bg-[#fafaf8] focus:outline-none focus:ring-2 focus:ring-amber-400/50 text-slate-700">
+                  <option value="">All cities</option>
+                  {uniqueCities.map(city => <option key={city} value={city}>{city}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center gap-3 mt-3 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-slate-500 whitespace-nowrap">Sort by</label>
+                  <select value={sortBy} onChange={e => setSortBy(e.target.value as typeof sortBy)}
+                    className="py-1.5 pl-2 pr-7 text-xs border border-stone-200 rounded-lg bg-[#fafaf8] focus:outline-none focus:ring-2 focus:ring-amber-400/50 text-slate-700">
+                    <option value="name-asc">Name A–Z</option>
+                    <option value="name-desc">Name Z–A</option>
+                    <option value="city">City</option>
+                    <option value="type">Type</option>
+                    <option value="status">Status</option>
+                  </select>
+                </div>
+                {filtersActive && (
+                  <button onClick={() => { setListingSearch(''); setFilterStatus('all'); setFilterType('all'); setFilterCity(''); }}
+                    className="text-xs text-amber-600 hover:text-amber-700 font-medium">Clear filters</button>
+                )}
+                <span className="text-xs text-slate-400 ml-auto">
+                  {filtersActive ? `${filtered.length} of ${allDetails.length} listings shown` : `${allDetails.length} listings`}
+                </span>
+              </div>
+            </div>
+            <div className="px-8 py-2 border-t border-stone-100 flex items-center gap-3 flex-wrap">
+              <button
+                onClick={() => {
+                  if (allFilteredSelected) setSelectedListingIds(prev => prev.filter(id => !filteredIds.includes(id)));
+                  else setSelectedListingIds(prev => Array.from(new Set([...prev, ...filteredIds])));
+                }}
+                className="text-xs font-medium text-amber-600 hover:text-amber-700">
+                {allFilteredSelected
+                  ? (filtersActive ? `Deselect ${filtered.length} filtered` : 'Deselect all')
+                  : (filtersActive ? `Select ${filtered.length} filtered` : 'Select all')}
+              </button>
+              {someFilteredSelected && !allFilteredSelected && (
+                <>
+                  <span className="text-xs text-slate-300">|</span>
+                  <button onClick={() => setSelectedListingIds(prev => prev.filter(id => !filteredIds.includes(id)))}
+                    className="text-xs font-medium text-slate-500 hover:text-slate-700">
+                    {filtersActive ? `Deselect ${filtered.length} filtered` : 'Deselect all'}
+                  </button>
+                </>
+              )}
+              <span className="ml-auto text-xs font-medium text-slate-600">
+                {selectedListingIds.length} of {allListingIds.length} listings selected
+              </span>
+            </div>
+            <div className="border-t border-stone-100 max-h-[480px] overflow-y-auto">
+              {filtered.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-10">No listings match your filters.</p>
+              ) : (
+                <>
+                  {groups.map(group => {
+                    const groupIds = [group.parent.id, ...group.rooms.map(r => r.id)];
+                    const allGroupSelected = groupIds.every(id => selectedListingIds.includes(id));
+                    const someGroupSelected = groupIds.some(id => selectedListingIds.includes(id));
+                    const isCollapsed = collapsedGroups.has(group.parent.id);
+                    return (
+                      <div key={group.parent.id} className="border-b border-stone-100 last:border-0">
+                        <div className={`flex items-center gap-3 px-3 py-2.5 bg-stone-50 hover:bg-stone-100/60 border-b border-stone-100 ${group.parent.isActive === false ? 'opacity-60' : ''}`}>
+                          <input type="checkbox" checked={allGroupSelected}
+                            ref={el => { if (el) el.indeterminate = someGroupSelected && !allGroupSelected; }}
+                            onChange={() => toggleGroup(group)}
+                            className="w-4 h-4 text-amber-500 rounded border-stone-300 focus:ring-amber-500/30 flex-shrink-0" />
+                          <button
+                            onClick={() => setCollapsedGroups(prev => { const next = new Set(prev); next.has(group.parent.id) ? next.delete(group.parent.id) : next.add(group.parent.id); return next; })}
+                            className="flex-1 text-left flex items-center gap-2 min-w-0">
+                            <svg className={`w-3.5 h-3.5 text-slate-400 flex-shrink-0 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                            </svg>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-sm font-semibold text-slate-800 truncate">{group.parent.title}</span>
+                                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 flex-shrink-0">Multi-Unit</span>
+                                {group.parent.isActive === false && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-stone-100 text-stone-500 flex-shrink-0">Inactive</span>}
+                              </div>
+                              <p className="text-xs text-slate-400 truncate">
+                                {group.rooms.length} unit{group.rooms.length !== 1 ? 's' : ''}
+                                {[group.parent.city, group.parent.state].filter(Boolean).join(', ') ? ` · ${[group.parent.city, group.parent.state].filter(Boolean).join(', ')}` : ''}
+                              </p>
+                            </div>
+                          </button>
+                          <span className="text-xs text-slate-400 flex-shrink-0 font-mono">{group.parent.id.slice(-8)}</span>
+                        </div>
+                        {!isCollapsed && group.rooms.map(room => <ListingRow key={room.id} listing={room} indent />)}
+                      </div>
+                    );
+                  })}
+                  {standalone.map(listing => <ListingRow key={listing.id} listing={listing} />)}
+                </>
+              )}
+            </div>
+            <div className="p-5 border-t border-stone-200 bg-[#fafaf8] rounded-b-2xl flex items-center justify-between gap-4 flex-wrap">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">{selectedListingIds.length} of {allListingIds.length} listings selected</p>
+                {(isBeta || isDemo) ? (
+                  <p className="text-xs text-slate-400">No charge — payment bypassed</p>
+                ) : summaryRequiresQuote ? (
+                  <p className="text-xs text-amber-700 font-medium">500+ listings requires a custom quote</p>
+                ) : selectedListingIds.length === 0 ? (
+                  <p className="text-xs text-slate-400">Select at least one listing to continue</p>
+                ) : (
+                  <p className="text-xs text-slate-400 capitalize">{summaryTier} tier · from {formatPrice(effectivePrice)}</p>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                <button onClick={() => setCurrentStep(1)} className="text-sm text-slate-400 hover:text-slate-600 font-medium">Back</button>
+                {(!isBeta && !isDemo) && summaryRequiresQuote ? (
+                  <button onClick={() => setShowQuoteModal(true)}
+                    className="bg-amber-500 hover:bg-amber-600 text-slate-900 px-6 py-2.5 rounded-xl font-semibold shadow-sm transition-all duration-200 text-sm">
+                    Contact Us for a Quote
+                  </button>
+                ) : (
+                  <button onClick={() => setCurrentStep(3)} disabled={selectedListingIds.length === 0}
+                    className="bg-amber-500 hover:bg-amber-600 text-slate-900 px-6 py-2.5 rounded-xl font-semibold shadow-sm hover:shadow-md disabled:opacity-50 transition-all duration-200 text-sm">
+                    Continue to Payment
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Step 3: Payment */}
-      {currentStep === 2 && pricing && (!pricing.requiresQuote || isBeta || isDemo) && manifest && (
+      {currentStep === 3 && pricing && (!pricing.requiresQuote || isBeta || isDemo) && manifest && (
         <div className="bg-white rounded-2xl shadow-sm border border-stone-200 p-8">
           <div className="max-w-2xl mx-auto">
             <div className="w-16 h-16 bg-amber-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
@@ -708,7 +959,7 @@ export default function Migrate() {
                       <span className="font-bold text-slate-900">Flat Rate</span>
                     </div>
                     <p className="text-2xl font-extrabold text-slate-900 ml-7">{formatPrice(flatCents)}</p>
-                    <p className="text-sm text-slate-400 ml-7 capitalize">{effectiveTier} tier — {effectiveListingCount} {isPilotPricing ? 'pilot ' : ''}listings</p>
+                    <p className="text-sm text-slate-400 ml-7 capitalize">{effectiveTier} tier — {effectiveListingCount} {isPilotPricing ? 'selected ' : ''}listings</p>
                   </button>
 
                   <button
@@ -808,7 +1059,7 @@ export default function Migrate() {
                   <div className="space-y-1 text-sm">
                     <div className="flex justify-between">
                       <span className="text-slate-500">
-                        {pricingMode === 'flat_tier' ? `${effectiveTier} flat rate` : `Per-listing (${effectiveListingCount} ${isPilotPricing ? 'pilot ' : ''}listings)`}
+                        {pricingMode === 'flat_tier' ? `${effectiveTier} flat rate` : `Per-listing (${effectiveListingCount} ${isPilotPricing ? 'selected ' : ''}listings)`}
                       </span>
                       <span className="font-medium text-slate-900">{formatPrice(baseCents)}</span>
                     </div>
@@ -861,7 +1112,7 @@ export default function Migrate() {
               </>
             )}
             <button
-              onClick={() => setCurrentStep(1)}
+              onClick={() => setCurrentStep(2)}
               className="block mx-auto mt-4 text-sm text-slate-400 hover:text-slate-600"
             >
               Go back
@@ -871,7 +1122,7 @@ export default function Migrate() {
       )}
 
       {/* Step 4: Progress */}
-      {currentStep === 3 && (
+      {currentStep === 4 && (
         <div className="bg-white rounded-2xl shadow-sm border border-stone-200 p-8">
           <div className="flex items-center justify-between mb-6">
             <div>
