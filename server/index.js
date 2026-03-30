@@ -70,8 +70,8 @@ app.use(cors({
 // Webhook routes need raw body — mount before json parser
 app.use('/api/webhooks', webhookRoutes);
 
-// JSON parser for all other routes
-app.use(express.json());
+// JSON parser for all other routes — 10 MB limit to handle large selectedListingIds arrays
+app.use(express.json({ limit: '10mb' }));
 
 // Cookie parser for httpOnly JWT cookies
 const cookieParser = require('cookie-parser');
