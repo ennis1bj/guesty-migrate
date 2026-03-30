@@ -221,6 +221,29 @@ router.post('/beta/:userId/invoice', async (req, res) => {
   }
 });
 
+// ── POST /api/admin/migrations/:id/cancel — force-fail a running migration ──
+
+router.post('/migrations/:id/cancel', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `UPDATE migrations
+       SET status = 'failed', error_message = 'Cancelled by admin', completed_at = NOW()
+       WHERE id = $1
+       RETURNING id, status`,
+      [id]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Migration not found' });
+    }
+    logger.info('Migration cancelled by admin', { migrationId: id, adminId: req.user.id });
+    res.json({ ok: true, migration: result.rows[0] });
+  } catch (err) {
+    logger.error('Admin cancel migration error', { error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ── GET /api/admin/users/search — search users by email ─────────────────────
 
 router.get('/users/search', async (req, res) => {
