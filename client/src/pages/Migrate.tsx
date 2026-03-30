@@ -75,6 +75,7 @@ interface MigrationStatus {
     migrated_count: number;
     failed_count: number;
   }>;
+  error_message: string | null;
 }
 
 function calculatePerListingCents(listingCount: number): number {
@@ -133,6 +134,7 @@ export default function Migrate() {
   const [selectedAddOns, setSelectedAddOns] = useState<AddOnKey[]>([]);
 
   const [migrationStatus, setMigrationStatus] = useState<MigrationStatus | null>(null);
+  const [pollKey, setPollKey] = useState(0);
 
   const [selectedListingIds, setSelectedListingIds] = useState<string[]>([]);
   const [allListingIds, setAllListingIds] = useState<string[]>([]);
@@ -224,7 +226,7 @@ export default function Migrate() {
     }, 4000);
 
     return () => clearInterval(interval);
-  }, [currentStep, migrationId, pollStatus]);
+  }, [currentStep, migrationId, pollStatus, pollKey]);
 
   const handleResendVerification = async () => {
     setResendStatus('loading');
@@ -374,6 +376,21 @@ export default function Migrate() {
   };
 
   const isTerminal = migrationStatus && ['complete', 'complete_with_errors', 'failed'].includes(migrationStatus.status);
+
+  const handleRetry = async () => {
+    if (!migrationId) return;
+    setError('');
+    setLoading(true);
+    try {
+      await api.post(`/migrations/${migrationId}/retry`);
+      setMigrationStatus(null);
+      setPollKey((k) => k + 1);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to retry migration. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   if (resumeLoading) {
     return (
@@ -1176,6 +1193,42 @@ export default function Migrate() {
             <div className="text-center py-8">
               <div className="animate-spin w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full mx-auto mb-4" />
               <p className="text-slate-400">Migration in progress...</p>
+            </div>
+          )}
+
+          {migrationStatus?.status === 'failed' && (
+            <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-xl">
+              <p className="text-sm font-bold text-red-900 mb-1">Migration failed</p>
+              {migrationStatus.error_message && (
+                <p className="text-sm text-red-700 font-mono break-all">{migrationStatus.error_message}</p>
+              )}
+              <button
+                onClick={handleRetry}
+                disabled={loading}
+                className="mt-3 bg-red-600 hover:bg-red-700 text-white px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 transition-all duration-200"
+              >
+                {loading ? 'Retrying...' : 'Retry Migration'}
+              </button>
+            </div>
+          )}
+
+          {migrationStatus?.status === 'complete_with_errors' && (
+            <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+              <p className="text-sm font-bold text-amber-900 mb-1">Completed with some errors</p>
+              <p className="text-sm text-amber-700">Most data migrated successfully. Review the logs above and the verification report below for details on which items failed.</p>
+            </div>
+          )}
+
+          {migrationStatus?.status === 'complete' && (
+            <div className="mt-6 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
+              <p className="text-sm font-bold text-emerald-900">Migration complete</p>
+              <p className="text-sm text-emerald-700 mt-0.5">All selected data has been successfully migrated. A verification report has been emailed to you.</p>
+            </div>
+          )}
+
+          {error && (
+            <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-sm text-red-700">{error}</p>
             </div>
           )}
 
