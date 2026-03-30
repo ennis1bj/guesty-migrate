@@ -127,6 +127,9 @@ export default function Migrate() {
           setMigrationId(data.migrationId);
           setManifest(data.manifest);
           setPricing(data.pricing);
+          if (data.manifest?.listingDetails) {
+            setAllListingIds(data.manifest.listingDetails.map((l: any) => l.id));
+          }
           setCurrentStep(1);
         })
         .catch(() => {
