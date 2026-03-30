@@ -104,6 +104,8 @@ export default function Migrate() {
   const [error, setError] = useState('');
   const [channelConfirmed, setChannelConfirmed] = useState(false);
   const [showQuoteModal, setShowQuoteModal] = useState(false);
+  const [resendStatus, setResendStatus] = useState<'idle' | 'loading' | 'sent' | 'error'>('idle');
+  const [resendError, setResendError] = useState('');
 
   useEffect(() => {
     const step = searchParams.get('step');
@@ -144,6 +146,18 @@ export default function Migrate() {
 
     return () => clearInterval(interval);
   }, [currentStep, migrationId, pollStatus]);
+
+  const handleResendVerification = async () => {
+    setResendStatus('loading');
+    setResendError('');
+    try {
+      await api.post('/auth/resend-verification');
+      setResendStatus('sent');
+    } catch (err: any) {
+      setResendStatus('error');
+      setResendError(err.response?.data?.error || 'Failed to send email. Please try again.');
+    }
+  };
 
   const handlePreflight = async () => {
     setError('');
@@ -278,7 +292,27 @@ export default function Migrate() {
 
       {error && (
         <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700">
-          {error}
+          <p>{error}</p>
+          {error.toLowerCase().includes('verify your email') && (
+            <div className="mt-3">
+              {resendStatus === 'sent' ? (
+                <p className="text-sm text-emerald-600 font-medium">Verification email sent — check your inbox.</p>
+              ) : (
+                <>
+                  {resendStatus === 'error' && (
+                    <p className="text-sm text-red-600 mb-1">{resendError}</p>
+                  )}
+                  <button
+                    onClick={handleResendVerification}
+                    disabled={resendStatus === 'loading'}
+                    className="text-sm font-semibold text-red-700 hover:text-red-900 underline underline-offset-2 disabled:opacity-60"
+                  >
+                    {resendStatus === 'loading' ? 'Sending…' : 'Resend verification email'}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
 

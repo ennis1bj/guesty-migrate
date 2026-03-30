@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../api';
+import { useAuth } from '../context/AuthContext';
 
 interface Migration {
   id: string;
@@ -24,8 +25,12 @@ const statusStyles: Record<string, string> = {
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [migrations, setMigrations] = useState<Migration[]>([]);
   const [loading, setLoading] = useState(true);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [resendStatus, setResendStatus] = useState<'idle' | 'loading' | 'sent' | 'error'>('idle');
+  const [resendError, setResendError] = useState('');
 
   const handleRetry = async (migrationId: string) => {
     try {
@@ -33,6 +38,18 @@ export default function Dashboard() {
       navigate(`/migrate?step=progress&migrationId=${migrationId}`);
     } catch (err) {
       console.error('Retry failed:', err);
+    }
+  };
+
+  const handleResend = async () => {
+    setResendStatus('loading');
+    setResendError('');
+    try {
+      await api.post('/auth/resend-verification');
+      setResendStatus('sent');
+    } catch (err: any) {
+      setResendStatus('error');
+      setResendError(err.response?.data?.error || 'Failed to send email. Please try again.');
     }
   };
 
@@ -54,6 +71,49 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
+
+      {/* Unverified email banner */}
+      {user && user.email_verified === false && !bannerDismissed && (
+        <div className="mb-6 bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 flex items-start gap-4">
+          <div className="shrink-0 mt-0.5">
+            <svg className="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-900">Please verify your email address</p>
+            {resendStatus === 'sent' ? (
+              <p className="text-sm text-amber-700 mt-0.5">Verification email sent — check your inbox.</p>
+            ) : (
+              <>
+                <p className="text-sm text-amber-700 mt-0.5">
+                  Check <span className="font-medium">{user.email}</span> for a verification link.
+                </p>
+                {resendStatus === 'error' && (
+                  <p className="text-sm text-red-600 mt-1">{resendError}</p>
+                )}
+                <button
+                  onClick={handleResend}
+                  disabled={resendStatus === 'loading'}
+                  className="mt-2 text-sm font-semibold text-amber-700 hover:text-amber-900 underline underline-offset-2 disabled:opacity-60"
+                >
+                  {resendStatus === 'loading' ? 'Sending…' : 'Resend verification email'}
+                </button>
+              </>
+            )}
+          </div>
+          <button
+            onClick={() => setBannerDismissed(true)}
+            className="shrink-0 text-amber-400 hover:text-amber-600 transition-colors"
+            aria-label="Dismiss"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Dashboard</h1>

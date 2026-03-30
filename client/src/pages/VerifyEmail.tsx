@@ -1,12 +1,16 @@
 import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import api from '../api';
+import { useAuth } from '../context/AuthContext';
 
 export default function VerifyEmail() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token') || '';
+  const { isAuthenticated } = useAuth();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [error, setError] = useState('');
+  const [resendStatus, setResendStatus] = useState<'idle' | 'loading' | 'sent' | 'error'>('idle');
+  const [resendError, setResendError] = useState('');
 
   useEffect(() => {
     if (!token) {
@@ -22,6 +26,18 @@ export default function VerifyEmail() {
         setError(err.response?.data?.error || 'Verification failed');
       });
   }, [token]);
+
+  const handleResend = async () => {
+    setResendStatus('loading');
+    setResendError('');
+    try {
+      await api.post('/auth/resend-verification');
+      setResendStatus('sent');
+    } catch (err: any) {
+      setResendStatus('error');
+      setResendError(err.response?.data?.error || 'Failed to send email. Please try again.');
+    }
+  };
 
   return (
     <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center px-4 py-12">
@@ -60,10 +76,32 @@ export default function VerifyEmail() {
                 </svg>
               </div>
               <h2 className="text-xl font-bold text-slate-900 mb-2">Verification Failed</h2>
-              <p className="text-slate-500 mb-6">{error}</p>
+              <p className="text-slate-500 mb-4">{error}</p>
+
+              {isAuthenticated && (
+                <div className="mb-6">
+                  {resendStatus === 'sent' ? (
+                    <p className="text-sm text-emerald-600 font-medium">Verification email sent — check your inbox.</p>
+                  ) : (
+                    <>
+                      {resendStatus === 'error' && (
+                        <p className="text-sm text-red-600 mb-2">{resendError}</p>
+                      )}
+                      <button
+                        onClick={handleResend}
+                        disabled={resendStatus === 'loading'}
+                        className="w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-slate-900 px-6 py-2.5 rounded-xl font-semibold shadow-sm hover:shadow-md transition-all duration-200 mb-3"
+                      >
+                        {resendStatus === 'loading' ? 'Sending…' : 'Resend verification email'}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+
               <Link
                 to="/login"
-                className="inline-block bg-amber-500 hover:bg-amber-600 text-slate-900 px-6 py-2.5 rounded-xl font-semibold shadow-sm hover:shadow-md transition-all duration-200"
+                className="inline-block text-sm text-slate-500 hover:text-slate-700 underline underline-offset-2"
               >
                 Back to Login
               </Link>

@@ -8,6 +8,7 @@ interface User {
   is_beta?: boolean;
   beta_expires_at?: string | null;
   is_admin?: boolean;
+  email_verified?: boolean;
 }
 
 interface AuthContextType {
