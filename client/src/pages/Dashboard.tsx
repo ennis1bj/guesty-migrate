@@ -40,6 +40,7 @@ export default function Dashboard() {
   const [resendError, setResendError] = useState('');
   const [discardingId, setDiscardingId] = useState<string | null>(null);
   const [confirmDiscardId, setConfirmDiscardId] = useState<string | null>(null);
+  const [incompleteCollapsed, setIncompleteCollapsed] = useState(false);
 
   const handleRetry = async (migrationId: string) => {
     try {
@@ -155,7 +156,21 @@ export default function Dashboard() {
       {/* Incomplete setup section */}
       {pendingMigrations.length > 0 && (
         <div className="mb-8">
-          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3">Incomplete Setup</h2>
+          <button
+            onClick={() => setIncompleteCollapsed((c) => !c)}
+            className="flex items-center gap-2 mb-3 group"
+          >
+            <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider group-hover:text-slate-700 transition-colors">
+              Incomplete Setup ({pendingMigrations.length})
+            </h2>
+            <svg
+              className={`w-4 h-4 text-slate-400 group-hover:text-slate-600 transition-transform ${incompleteCollapsed ? '-rotate-90' : ''}`}
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {!incompleteCollapsed && (
           <div className="space-y-3">
             {pendingMigrations.map((m) => (
               <div
@@ -219,6 +234,7 @@ export default function Dashboard() {
               </div>
             ))}
           </div>
+          )}
         </div>
       )}
 

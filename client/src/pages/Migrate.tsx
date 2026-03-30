@@ -102,6 +102,7 @@ export default function Migrate() {
 
   const [loading, setLoading] = useState(false);
   const [resumeLoading, setResumeLoading] = useState(false);
+  const [resumeError, setResumeError] = useState('');
   const [error, setError] = useState('');
   const [channelConfirmed, setChannelConfirmed] = useState(false);
   const [showQuoteModal, setShowQuoteModal] = useState(false);
@@ -129,7 +130,7 @@ export default function Migrate() {
           setCurrentStep(1);
         })
         .catch(() => {
-          setError('That setup could not be resumed. Please start a new migration.');
+          setResumeError('That setup could not be resumed — it may have expired. Please start a new migration.');
         })
         .finally(() => setResumeLoading(false));
       return;
@@ -321,6 +322,12 @@ export default function Migrate() {
       <p className="text-slate-500 mb-8">Follow the steps below to migrate your Guesty account data.</p>
 
       <StepWizard steps={STEPS} currentStep={currentStep} />
+
+      {resumeError && (
+        <div className="mb-6 p-4 bg-slate-50 border border-slate-200 rounded-xl text-slate-600 text-sm">
+          {resumeError}
+        </div>
+      )}
 
       {error && (
         <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700">
