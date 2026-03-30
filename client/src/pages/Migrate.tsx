@@ -17,6 +17,11 @@ const STEPS = [
 interface ListingDetail {
   id: string;
   title?: string;
+  nickname?: string | null;
+  type?: string | null;
+  complexId?: string | null;
+  city?: string | null;
+  isActive?: boolean;
 }
 
 const ALL_CATEGORIES = ['custom_fields', 'fees', 'listings', 'guests', 'owners', 'saved_replies', 'reservations', 'tasks'];
@@ -104,6 +109,7 @@ export default function Migrate() {
   const [pilotMode, setPilotMode] = useState(false);
   const [selectedListingIds, setSelectedListingIds] = useState<string[]>([]);
   const [allListingIds, setAllListingIds] = useState<string[]>([]);
+  const [listingSearch, setListingSearch] = useState('');
 
   const [loading, setLoading] = useState(false);
   const [resumeLoading, setResumeLoading] = useState(false);
@@ -530,83 +536,171 @@ export default function Migrate() {
           </div>
 
           {/* Pilot Mode Listing Picker */}
-          {(manifest.listings ?? 0) > 0 && selectedCategories.includes('listings') && (
-            <div className="mt-6 p-5 bg-white border border-stone-200 rounded-xl">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="font-bold text-slate-900">Listing Selection</h3>
-                  <p className="text-sm text-slate-400">Choose which listings to migrate</p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => { setPilotMode(false); setSelectedListingIds([]); }}
-                    className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-                      !pilotMode ? 'bg-amber-500 text-slate-900' : 'bg-stone-100 text-slate-600 hover:bg-stone-200'
-                    }`}
-                  >
-                    Migrate All
-                  </button>
-                  <button
-                    onClick={() => setPilotMode(true)}
-                    className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-                      pilotMode ? 'bg-amber-500 text-slate-900' : 'bg-stone-100 text-slate-600 hover:bg-stone-200'
-                    }`}
-                  >
-                    Pilot Mode
-                  </button>
-                </div>
-              </div>
+          {(manifest.listings ?? 0) > 0 && selectedCategories.includes('listings') && (() => {
+            const allDetails = ((manifest as Record<string, unknown>).listingDetails as ListingDetail[] | undefined) ?? [];
+            const q = listingSearch.toLowerCase().trim();
+            const filteredDetails = q
+              ? allDetails.filter(l =>
+                  (l.title ?? '').toLowerCase().includes(q) ||
+                  (l.nickname ?? '').toLowerCase().includes(q) ||
+                  (l.city ?? '').toLowerCase().includes(q) ||
+                  (l.type ?? '').toLowerCase().includes(q) ||
+                  l.id.toLowerCase().includes(q)
+                )
+              : allDetails;
+            const filteredIds = filteredDetails.map(l => l.id);
+            const allFilteredSelected = filteredIds.length > 0 && filteredIds.every(id => selectedListingIds.includes(id));
 
-              {pilotMode && (
-                <div>
-                  <p className="text-sm text-slate-500 mb-3">
-                    Select specific listings to migrate. Dependent items (reservations, tasks, saved replies) will be scoped to these listings only.
-                  </p>
-                  <div className="flex items-center gap-2 mb-3">
-                    <button
-                      onClick={() => setSelectedListingIds(allListingIds)}
-                      className="text-xs text-amber-600 hover:text-amber-700 font-medium"
-                    >
-                      Select all
-                    </button>
-                    <span className="text-xs text-slate-300">|</span>
-                    <button
-                      onClick={() => setSelectedListingIds([])}
-                      className="text-xs text-amber-600 hover:text-amber-700 font-medium"
-                    >
-                      Clear all
-                    </button>
-                    <span className="text-xs text-slate-400 ml-auto">
-                      {selectedListingIds.length} of {allListingIds.length} selected
-                    </span>
+            const typeBadge = (l: ListingDetail) => {
+              if (l.type === 'MTL') return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 flex-shrink-0">Multi-Unit</span>;
+              if (l.complexId)      return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 flex-shrink-0">Complex Unit</span>;
+              if (l.type === 'ROOM') return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 flex-shrink-0">Room</span>;
+              return null;
+            };
+
+            return (
+              <div className="mt-6 p-5 bg-white border border-stone-200 rounded-xl">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="font-bold text-slate-900">Listing Selection</h3>
+                    <p className="text-sm text-slate-400">Choose which listings to migrate</p>
                   </div>
-                  <div className="max-h-60 overflow-y-auto border border-stone-100 rounded-lg">
-                    {((manifest as Record<string, unknown>).listingDetails as ListingDetail[] | undefined)?.map((listing) => (
-                      <label
-                        key={listing.id}
-                        className="flex items-center gap-3 px-3 py-2 hover:bg-stone-50 cursor-pointer border-b border-stone-50 last:border-0"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedListingIds.includes(listing.id)}
-                          onChange={() => {
-                            setSelectedListingIds(prev =>
-                              prev.includes(listing.id)
-                                ? prev.filter(id => id !== listing.id)
-                                : [...prev, listing.id]
-                            );
-                          }}
-                          className="w-4 h-4 text-amber-500 rounded border-stone-300 focus:ring-amber-500/30"
-                        />
-                        <span className="text-sm text-slate-700 truncate">{listing.title}</span>
-                        <span className="text-xs text-slate-400 ml-auto flex-shrink-0 font-mono">{listing.id.slice(-8)}</span>
-                      </label>
-                    ))}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => { setPilotMode(false); setSelectedListingIds([]); setListingSearch(''); }}
+                      className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                        !pilotMode ? 'bg-amber-500 text-slate-900' : 'bg-stone-100 text-slate-600 hover:bg-stone-200'
+                      }`}
+                    >
+                      Migrate All
+                    </button>
+                    <button
+                      onClick={() => { setPilotMode(true); }}
+                      className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                        pilotMode ? 'bg-amber-500 text-slate-900' : 'bg-stone-100 text-slate-600 hover:bg-stone-200'
+                      }`}
+                    >
+                      Pilot Mode
+                    </button>
                   </div>
                 </div>
-              )}
-            </div>
-          )}
+
+                {pilotMode && (
+                  <div>
+                    <p className="text-sm text-slate-500 mb-3">
+                      Select specific listings to migrate. Reservations, tasks, and saved replies will be scoped to the selected listings only.
+                    </p>
+
+                    {/* Search box */}
+                    <div className="relative mb-3">
+                      <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+                      </svg>
+                      <input
+                        type="text"
+                        value={listingSearch}
+                        onChange={e => setListingSearch(e.target.value)}
+                        placeholder="Search by name, city, type, or ID…"
+                        className="w-full pl-9 pr-9 py-2 text-sm border border-stone-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400/50 bg-[#fafaf8]"
+                      />
+                      {listingSearch && (
+                        <button
+                          onClick={() => setListingSearch('')}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                          aria-label="Clear search"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Toolbar */}
+                    <div className="flex items-center gap-2 mb-2">
+                      <button
+                        onClick={() => {
+                          if (allFilteredSelected) {
+                            setSelectedListingIds(prev => prev.filter(id => !filteredIds.includes(id)));
+                          } else {
+                            setSelectedListingIds(prev => Array.from(new Set([...prev, ...filteredIds])));
+                          }
+                        }}
+                        className="text-xs text-amber-600 hover:text-amber-700 font-medium"
+                      >
+                        {allFilteredSelected
+                          ? (q ? 'Deselect filtered' : 'Deselect all')
+                          : (q ? `Select all ${filteredDetails.length} filtered` : 'Select all')}
+                      </button>
+                      <span className="text-xs text-slate-300">|</span>
+                      <button
+                        onClick={() => setSelectedListingIds([])}
+                        className="text-xs text-amber-600 hover:text-amber-700 font-medium"
+                      >
+                        Clear all
+                      </button>
+                      <span className="text-xs text-slate-400 ml-auto">
+                        {selectedListingIds.length} of {allListingIds.length} selected
+                        {q && filteredDetails.length !== allDetails.length && (
+                          <span className="text-slate-300"> · {filteredDetails.length} shown</span>
+                        )}
+                      </span>
+                    </div>
+
+                    {/* Listing list */}
+                    <div className="max-h-72 overflow-y-auto border border-stone-100 rounded-lg">
+                      {filteredDetails.length === 0 ? (
+                        <p className="text-sm text-slate-400 text-center py-6">No listings match your search.</p>
+                      ) : (
+                        filteredDetails.map((listing) => (
+                          <label
+                            key={listing.id}
+                            className={`flex items-center gap-3 px-3 py-2.5 hover:bg-stone-50 cursor-pointer border-b border-stone-50 last:border-0 ${
+                              listing.isActive === false ? 'opacity-60' : ''
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedListingIds.includes(listing.id)}
+                              onChange={() => {
+                                setSelectedListingIds(prev =>
+                                  prev.includes(listing.id)
+                                    ? prev.filter(id => id !== listing.id)
+                                    : [...prev, listing.id]
+                                );
+                              }}
+                              className="w-4 h-4 text-amber-500 rounded border-stone-300 focus:ring-amber-500/30 flex-shrink-0"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-sm text-slate-700 truncate">{listing.title}</span>
+                                {typeBadge(listing)}
+                                {listing.isActive === false && (
+                                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-stone-100 text-stone-500 flex-shrink-0">Inactive</span>
+                                )}
+                              </div>
+                              {(listing.nickname && listing.nickname !== listing.title) || listing.city ? (
+                                <p className="text-xs text-slate-400 truncate mt-0.5">
+                                  {[listing.nickname !== listing.title ? listing.nickname : null, listing.city].filter(Boolean).join(' · ')}
+                                </p>
+                              ) : null}
+                            </div>
+                            <span className="text-xs text-slate-400 flex-shrink-0 font-mono">{listing.id.slice(-8)}</span>
+                          </label>
+                        ))
+                      )}
+                    </div>
+
+                    {selectedListingIds.length === 0 && (
+                      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-3">
+                        Select at least one listing to continue in pilot mode.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           <div className="mt-8 p-5 bg-[#fafaf8] border border-stone-200 rounded-xl flex items-center justify-between">
             <div>
@@ -633,7 +727,7 @@ export default function Migrate() {
             ) : (
               <button
                 onClick={() => setCurrentStep(2)}
-                disabled={selectedCategories.length === 0}
+                disabled={selectedCategories.length === 0 || (pilotMode && selectedListingIds.length === 0)}
                 className="bg-amber-500 hover:bg-amber-600 text-slate-900 px-8 py-3 rounded-xl font-semibold shadow-sm hover:shadow-md disabled:opacity-50 transition-all duration-200"
               >
                 Continue to Payment

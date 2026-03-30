@@ -75,7 +75,15 @@ router.post('/preflight', async (req, res) => {
         saved_replies: savedReplies,
         tasks,
         photos: photoCount,
-        listingDetails: allListings.map(l => ({ id: l._id, title: l.title || l.nickname || `Listing ${l._id}` })),
+        listingDetails: allListings.map(l => ({
+          id:        l._id,
+          title:     l.title || l.nickname || `Listing ${l._id}`,
+          nickname:  l.nickname || null,
+          type:      l.type || 'STL',
+          complexId: l.complexId || null,
+          city:      l.address?.city || null,
+          isActive:  l.active !== false,
+        })),
       };
     } catch (err) {
       const details = err.response?.data?.message || err.message;
