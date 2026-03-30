@@ -1,5 +1,5 @@
 import { useState, FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api';
 
@@ -11,13 +11,16 @@ export default function Login() {
   const { login, isAuthenticated, authLoading } = useAuth();
   const navigate = useNavigate();
 
-  // While the session check is in flight, render nothing so ProtectedRoute
-  // doesn't race-redirect us. Once resolved, redirect already-logged-in users.
-  if (authLoading) return null;
-  if (isAuthenticated) {
-    navigate('/dashboard', { replace: true });
-    return null;
+  // While the session check is in flight, show a spinner so there's no
+  // blank flash. Once resolved, redirect already-logged-in users to dashboard.
+  if (authLoading) {
+    return (
+      <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center">
+        <div className="animate-spin w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full" />
+      </div>
+    );
   }
+  if (isAuthenticated) return <Navigate to="/dashboard" replace />;
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();

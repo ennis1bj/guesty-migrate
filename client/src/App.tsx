@@ -14,15 +14,23 @@ import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
 import MigratePreview from './pages/MigratePreview';
 
+function AuthLoadingSpinner() {
+  return (
+    <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center">
+      <div className="animate-spin w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full" />
+    </div>
+  );
+}
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, authLoading } = useAuth();
-  if (authLoading) return null;
+  if (authLoading) return <AuthLoadingSpinner />;
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" />;
 }
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, authLoading, user } = useAuth();
-  if (authLoading) return null;
+  if (authLoading) return <AuthLoadingSpinner />
   if (!isAuthenticated) return <Navigate to="/login" />;
   if (!user?.is_admin) return <Navigate to="/dashboard" />;
   return <>{children}</>;

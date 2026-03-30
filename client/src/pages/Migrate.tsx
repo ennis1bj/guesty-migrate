@@ -1218,7 +1218,14 @@ export default function Migrate() {
           {migrationStatus?.status === 'complete_with_errors' && (
             <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
               <p className="text-sm font-bold text-amber-900 mb-1">Completed with some errors</p>
-              <p className="text-sm text-amber-700">Most data migrated successfully. Review the logs above and the verification report below for details on which items failed.</p>
+              <p className="text-sm text-amber-700 mb-3">Some items couldn't be migrated due to errors. Review the details above, then retry to re-attempt any failed items.</p>
+              <button
+                onClick={handleRetry}
+                disabled={loading}
+                className="bg-amber-500 hover:bg-amber-600 text-slate-900 px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 transition-all duration-200"
+              >
+                {loading ? 'Retrying...' : 'Retry Migration'}
+              </button>
             </div>
           )}
 
