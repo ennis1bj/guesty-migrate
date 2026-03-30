@@ -37,6 +37,16 @@ let migrationWorker = null;
 // ── Internal helpers ───────────────────────────────────────────────────────────
 
 /**
+ * Returns true for transient TCP/connection errors that ioredis's retryStrategy
+ * will automatically recover from.  These should NOT trigger a full queue
+ * teardown — we just log them and let ioredis retry in-place.
+ */
+function isTransientRedisError(err) {
+  const text = (err.message || '') + (err.code || '');
+  return /ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|socket/i.test(text);
+}
+
+/**
  * Attach error handlers to a BullMQ queue or worker's underlying Redis client
  * so ioredis never emits an unhandled 'error' event. (#80)
  */
@@ -122,8 +132,17 @@ async function initQueue() {
     migrationQueue = new Queue('migrations', { connection });
 
     // Error handler on the Queue itself (#80)
+    // Only tear down for genuinely fatal errors — transient connection issues
+    // (ETIMEDOUT, ECONNRESET, etc.) are handled automatically by ioredis's
+    // retryStrategy and do NOT warrant destroying the queue object.
     migrationQueue.on('error', (err) => {
-      logger.error('BullMQ Queue error', { error: err.message });
+      if (isTransientRedisError(err)) {
+        logger.warn('BullMQ Queue connection error — ioredis will retry', {
+          error: err.message, code: err.code,
+        });
+        return;
+      }
+      logger.error('BullMQ Queue error (fatal)', { error: err.message });
       closeQueue(`Queue error: ${err.message}`);
     });
 
@@ -151,8 +170,16 @@ async function initQueue() {
     });
 
     // Error handler on the Worker itself (#80)
+    // Transient connection errors: log and let ioredis retry in-place.
+    // Fatal errors (auth, bad config, etc.): close the queue and fall back.
     migrationWorker.on('error', (err) => {
-      logger.error('BullMQ Worker error', { error: err.message });
+      if (isTransientRedisError(err)) {
+        logger.warn('BullMQ Worker connection error — ioredis will retry', {
+          error: err.message, code: err.code,
+        });
+        return;
+      }
+      logger.error('BullMQ Worker error (fatal)', { error: err.message });
       closeQueue(`Worker error: ${err.message}`);
     });
 

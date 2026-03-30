@@ -25,7 +25,7 @@ try {
 let redisAvailable = false;
 let reconnectTimer = null;
 let reconnectFailures = 0;
-let reconnectIntervalMs = 30_000; // starts at 30 s, backs off exponentially
+let reconnectIntervalMs = 10_000; // starts at 10 s, backs off exponentially to 30 s max
 
 function isRedisAvailable() {
   return redisAvailable;
@@ -268,7 +268,7 @@ function scheduleNextReconnect(onReconnect) {
 
     if (redisAvailable) {
       // Already reconnected by some other path — reset backoff and stop.
-      reconnectIntervalMs = 30_000;
+      reconnectIntervalMs = 10_000;
       reconnectFailures = 0;
       return;
     }
@@ -281,7 +281,7 @@ function scheduleNextReconnect(onReconnect) {
     const ok = await validateRedisConnection();
     if (ok) {
       reconnectFailures = 0;
-      reconnectIntervalMs = 30_000; // reset backoff on success
+      reconnectIntervalMs = 10_000; // reset backoff on success
       logger.info('Redis is reachable again — attempting queue re-initialization');
       if (typeof onReconnect === 'function') {
         try {
@@ -294,8 +294,8 @@ function scheduleNextReconnect(onReconnect) {
       }
     } else {
       reconnectFailures += 1;
-      // Exponential backoff: 30 s → 60 s → 120 s → … → 5 min cap
-      reconnectIntervalMs = Math.min(reconnectIntervalMs * 2, 5 * 60_000);
+      // Exponential backoff: 30 s → 60 s → … → 30 s cap
+      reconnectIntervalMs = Math.min(reconnectIntervalMs * 2, 30_000);
       logger.warn('Redis still unreachable — will retry', {
         attempt: reconnectFailures,
         nextCheckMs: reconnectIntervalMs,
@@ -310,7 +310,7 @@ function scheduleNextReconnect(onReconnect) {
 
 function startReconnectLoop(onReconnect) {
   reconnectFailures = 0;
-  reconnectIntervalMs = 30_000;
+  reconnectIntervalMs = 10_000; // reset to initial interval on each new loop
   scheduleNextReconnect(onReconnect);
 }
 
