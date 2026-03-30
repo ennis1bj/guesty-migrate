@@ -178,6 +178,8 @@ async function start() {
 
     // Recover any stuck migrations from before restart
     await recoverStuckMigrations();
+    // Also run every 5 minutes — catches jobs dropped from Redis without a restart
+    setInterval(recoverStuckMigrations, 5 * 60 * 1000);
 
     // Initialize job queue (async — pre-tests Redis before handing to BullMQ)
     await initQueue();

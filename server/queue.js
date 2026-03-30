@@ -248,11 +248,11 @@ async function recoverStuckMigrations() {
     }
 
     // ── 2. Re-enqueue paid migrations that were never picked up ────────────
-    // A migration in 'paid' status for more than 10 minutes means the BullMQ
+    // A migration in 'paid' status for more than 5 minutes means the BullMQ
     // worker never claimed it (e.g. due to a Redis connection blip at startup
     // or a server restart after enqueuing).  Re-enqueue them so they run.
     const paidResult = await pool.query(
-      "SELECT id, pricing_mode FROM migrations WHERE status = 'paid' AND created_at < NOW() - INTERVAL '10 minutes'"
+      "SELECT id, pricing_mode FROM migrations WHERE status = 'paid' AND created_at < NOW() - INTERVAL '5 minutes'"
     );
     for (const row of paidResult.rows) {
       const priority = row.pricing_mode === 'beta' ? 1 : 10;
