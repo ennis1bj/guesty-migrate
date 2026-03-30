@@ -286,6 +286,74 @@ router.get('/me', authenticateToken, async (req, res) => {
   }
 });
 
+// ── POST /api/auth/resend-verification-public ────────────────────────────────
+// Unauthenticated: accepts an email address; always returns success to prevent
+// account enumeration. Sends a new verification link if the email exists and
+// the account is unverified. Subject to the same 5-minute cooldown.
+
+router.post('/resend-verification-public',
+  body('email').isEmail().normalizeEmail(),
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ error: errors.array()[0].msg });
+      }
+
+      const { email } = req.body;
+      const userResult = await pool.query(
+        'SELECT id, email, email_verified, verify_token_expires FROM users WHERE email = $1',
+        [email]
+      );
+
+      // Always return success to prevent account enumeration
+      if (userResult.rows.length === 0 || userResult.rows[0].email_verified) {
+        return res.json({ success: true, message: 'If this email is registered and unverified, a new link has been sent.' });
+      }
+
+      const user = userResult.rows[0];
+
+      // 5-minute cooldown check
+      if (user.verify_token_expires) {
+        const expiresAt = new Date(user.verify_token_expires).getTime();
+        const cooldownCutoff = Date.now() + (24 * 60 - 5) * 60 * 1000;
+        if (expiresAt > cooldownCutoff) {
+          return res.status(429).json({ error: 'Please wait a few minutes before requesting another verification email.' });
+        }
+      }
+
+      const verifyToken = crypto.randomBytes(32).toString('hex');
+      const hashedVerifyToken = crypto.createHash('sha256').update(verifyToken).digest('hex');
+      const verifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      await pool.query(
+        'UPDATE users SET verify_token = $1, verify_token_expires = $2 WHERE id = $3',
+        [hashedVerifyToken, verifyExpires, user.id]
+      );
+
+      const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const verifyUrl = `${baseUrl}/verify-email?token=${verifyToken}`;
+
+      await sendEmail(user.email, 'Verify your GuestyMigrate email', `
+        <div style="font-family:sans-serif;max-width:500px;margin:0 auto">
+          <h2 style="color:#4f46e5">Verify Your Email</h2>
+          <p>You requested a new verification link for your GuestyMigrate account. Click the button below to verify your email address.</p>
+          <a href="${verifyUrl}" style="display:inline-block;background:#f59e0b;color:#0f172a;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;margin:16px 0">
+            Verify Email
+          </a>
+          <p style="color:#6b7280;font-size:14px">This link expires in 24 hours.</p>
+        </div>
+      `);
+
+      logger.info('Verification email resent (public)', { userId: user.id });
+      res.json({ success: true, message: 'If this email is registered and unverified, a new link has been sent.' });
+    } catch (err) {
+      logger.error('Public resend verification error', { error: err.message });
+      res.status(500).json({ error: 'Failed to send verification email' });
+    }
+  }
+);
+
 // ── POST /api/auth/resend-verification ──────────────────────────────────────
 
 router.post('/resend-verification', authenticateToken, async (req, res) => {

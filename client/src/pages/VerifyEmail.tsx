@@ -9,6 +9,8 @@ export default function VerifyEmail() {
   const { isAuthenticated } = useAuth();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [error, setError] = useState('');
+
+  const [resendEmail, setResendEmail] = useState('');
   const [resendStatus, setResendStatus] = useState<'idle' | 'loading' | 'sent' | 'error'>('idle');
   const [resendError, setResendError] = useState('');
 
@@ -27,11 +29,24 @@ export default function VerifyEmail() {
       });
   }, [token]);
 
-  const handleResend = async () => {
+  const handleResendAuthenticated = async () => {
     setResendStatus('loading');
     setResendError('');
     try {
       await api.post('/auth/resend-verification');
+      setResendStatus('sent');
+    } catch (err: any) {
+      setResendStatus('error');
+      setResendError(err.response?.data?.error || 'Failed to send email. Please try again.');
+    }
+  };
+
+  const handleResendPublic = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setResendStatus('loading');
+    setResendError('');
+    try {
+      await api.post('/auth/resend-verification-public', { email: resendEmail });
       setResendStatus('sent');
     } catch (err: any) {
       setResendStatus('error');
@@ -78,34 +93,48 @@ export default function VerifyEmail() {
               <h2 className="text-xl font-bold text-slate-900 mb-2">Verification Failed</h2>
               <p className="text-slate-500 mb-6">{error}</p>
 
-              {/* Resend section — always visible */}
+              {/* Resend section — always shown */}
               <div className="mb-6 p-4 bg-stone-50 border border-stone-200 rounded-xl text-left">
-                <p className="text-sm font-semibold text-slate-700 mb-1">Need a new link?</p>
-                {isAuthenticated ? (
-                  resendStatus === 'sent' ? (
-                    <p className="text-sm text-emerald-600 font-medium">Verification email sent — check your inbox.</p>
-                  ) : (
-                    <>
-                      <p className="text-sm text-slate-500 mb-3">Request a fresh verification email below.</p>
-                      {resendStatus === 'error' && (
-                        <p className="text-sm text-red-600 mb-2">{resendError}</p>
-                      )}
-                      <button
-                        onClick={handleResend}
-                        disabled={resendStatus === 'loading'}
-                        className="w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-slate-900 px-4 py-2 rounded-xl text-sm font-semibold shadow-sm hover:shadow-md transition-all duration-200"
-                      >
-                        {resendStatus === 'loading' ? 'Sending…' : 'Resend verification email'}
-                      </button>
-                    </>
-                  )
+                <p className="text-sm font-semibold text-slate-700 mb-2">Need a new verification link?</p>
+
+                {resendStatus === 'sent' ? (
+                  <p className="text-sm text-emerald-600 font-medium">Check your inbox — a new verification link is on its way.</p>
+                ) : isAuthenticated ? (
+                  <>
+                    <p className="text-sm text-slate-500 mb-3">Request a fresh link for your registered email address.</p>
+                    {resendStatus === 'error' && (
+                      <p className="text-sm text-red-600 mb-2">{resendError}</p>
+                    )}
+                    <button
+                      onClick={handleResendAuthenticated}
+                      disabled={resendStatus === 'loading'}
+                      className="w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-slate-900 px-4 py-2 rounded-xl text-sm font-semibold shadow-sm hover:shadow-md transition-all duration-200"
+                    >
+                      {resendStatus === 'loading' ? 'Sending…' : 'Resend verification email'}
+                    </button>
+                  </>
                 ) : (
-                  <p className="text-sm text-slate-500">
-                    <Link to="/login" className="font-semibold text-amber-600 hover:text-amber-700 underline underline-offset-2">
-                      Log in
-                    </Link>
-                    {' '}to your account and request a new verification link from your dashboard.
-                  </p>
+                  <form onSubmit={handleResendPublic} className="space-y-3">
+                    <p className="text-sm text-slate-500">Enter your email address and we'll send a new link.</p>
+                    {resendStatus === 'error' && (
+                      <p className="text-sm text-red-600">{resendError}</p>
+                    )}
+                    <input
+                      type="email"
+                      required
+                      value={resendEmail}
+                      onChange={(e) => setResendEmail(e.target.value)}
+                      placeholder="your@email.com"
+                      className="w-full px-3 py-2 border border-stone-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    />
+                    <button
+                      type="submit"
+                      disabled={resendStatus === 'loading'}
+                      className="w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-slate-900 px-4 py-2 rounded-xl text-sm font-semibold shadow-sm hover:shadow-md transition-all duration-200"
+                    >
+                      {resendStatus === 'loading' ? 'Sending…' : 'Resend verification email'}
+                    </button>
+                  </form>
                 )}
               </div>
 
