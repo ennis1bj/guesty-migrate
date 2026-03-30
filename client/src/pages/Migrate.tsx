@@ -160,7 +160,7 @@ export default function Migrate() {
       return;
     }
 
-    if (step === 'review' && id) {
+    const resumeToStep = (id: string, step: number) => {
       setResumeLoading(true);
       api
         .get(`/migrations/${id}/resume`)
@@ -174,12 +174,21 @@ export default function Migrate() {
             setAllListingIds(ids);
             setSelectedListingIds(ids);
           }
-          setCurrentStep(1);
+          setCurrentStep(step);
         })
         .catch(() => {
-          setResumeError('That setup could not be resumed — it may have expired. Please start a new migration.');
+          setResumeError('That session could not be restored — it may have expired. Please start a new migration.');
         })
         .finally(() => setResumeLoading(false));
+    };
+
+    if (step === 'review' && id) {
+      resumeToStep(id, 1);
+      return;
+    }
+
+    if (step === 'payment' && id) {
+      resumeToStep(id, 3);
       return;
     }
   }, [searchParams]);
@@ -259,7 +268,7 @@ export default function Migrate() {
 
   const handleCheckout = async () => {
     if (!migrationId) return;
-    if (pricing?.requiresQuote && selectedListingIds.length >= 500) {
+    if (effectiveListingCount >= 500) {
       setShowQuoteModal(true);
       return;
     }
@@ -1136,6 +1145,14 @@ export default function Migrate() {
             <div className="text-center py-12">
               <div className="animate-spin w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full mx-auto mb-4" />
               <p className="text-slate-400">Waiting for migration to start...</p>
+            </div>
+          )}
+
+          {migrationStatus && ['pending', 'paid'].includes(migrationStatus.status) && (
+            <div className="text-center py-12">
+              <div className="animate-spin w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full mx-auto mb-4" />
+              <p className="text-slate-600 font-medium">Migration queued</p>
+              <p className="text-slate-400 text-sm mt-1">Your migration has been received and will start shortly.</p>
             </div>
           )}
 
