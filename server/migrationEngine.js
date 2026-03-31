@@ -406,17 +406,28 @@ async function logCategory(migrationId, category, status, sourceCount, migratedC
 }
 
 async function loadPreviousResults(migrationId) {
-  const result = await pool.query(
-    `SELECT category, migrated_count FROM migration_logs
-     WHERE migration_id = $1 ORDER BY created_at ASC`,
-    [migrationId]
-  );
-  // Returns map of category -> already migrated count
+  const [logsResult, migResult] = await Promise.all([
+    pool.query(
+      `SELECT category, migrated_count FROM migration_logs
+       WHERE migration_id = $1 ORDER BY created_at ASC`,
+      [migrationId]
+    ),
+    pool.query(
+      `SELECT results FROM migrations WHERE id = $1`,
+      [migrationId]
+    ),
+  ]);
+
+  // Map of category -> already migrated count (from migration_logs)
   const prev = {};
-  for (const row of result.rows) {
+  for (const row of logsResult.rows) {
     prev[row.category] = row.migrated_count || 0;
   }
-  return prev;
+
+  // Full stored results JSONB — used to recover idMaps and photo errors on retry
+  const storedResults = migResult.rows[0]?.results || {};
+
+  return { prev, storedResults };
 }
 
 async function runMigration(migrationId) {
@@ -441,7 +452,7 @@ async function runMigration(migrationId) {
 
   const migration = migResult.rows[0];
 
-  const previousResults = await loadPreviousResults(migrationId);
+  const { prev: previousResults, storedResults } = await loadPreviousResults(migrationId);
 
   const sourceClient = new GuestyClient({
     clientId: decrypt(migration.source_client_id),
@@ -487,9 +498,60 @@ async function runMigration(migrationId) {
       continue;
     }
 
-    // Skip categories that already completed successfully in a prior run
+    // Skip categories that already completed successfully in a prior run,
+    // but first restore their idMap so dependent categories can remap IDs,
+    // and for listings specifically retry any photo uploads that previously failed.
     if (previousResults[category] > 0) {
       log.info(`Skipping ${category} — already migrated in prior run`, { count: previousResults[category] });
+
+      // Restore the stored idMap so dependent categories (reservations, tasks,
+      // saved_replies) can still remap their foreign keys correctly.
+      const storedIdMap = storedResults[category]?.idMap;
+      if (storedIdMap && typeof storedIdMap === 'object') {
+        idMaps[category] = storedIdMap;
+      }
+
+      // Listings only: re-attempt photo uploads that failed in the prior run.
+      if (category === 'listings' && storedIdMap) {
+        const prevErrors = storedResults.listings?.errors || [];
+        const photoErrors = prevErrors.filter(e => e.photoUrl);
+        if (photoErrors.length > 0) {
+          log.info(`Retrying ${photoErrors.length} failed photo upload(s) from prior run`);
+          // Group photo errors by sourceId so we can batch per listing
+          const bySource = {};
+          for (const e of photoErrors) {
+            if (!bySource[e.sourceId]) bySource[e.sourceId] = [];
+            bySource[e.sourceId].push(e.photoUrl);
+          }
+          const photoRetryErrors = [];
+          for (const [sourceId, photoUrls] of Object.entries(bySource)) {
+            const destId = storedIdMap[sourceId];
+            if (!destId) continue; // no dest mapping — can't retry
+            for (const photoUrl of photoUrls) {
+              try {
+                await destClient.uploadListingPhoto(destId, photoUrl);
+                totalPhotos.migrated++;
+              } catch (photoErr) {
+                totalPhotos.failed++;
+                photoRetryErrors.push({
+                  sourceId,
+                  photoUrl,
+                  error: photoErr.response?.data?.message || photoErr.message,
+                });
+              }
+            }
+          }
+          if (photoRetryErrors.length > 0) {
+            hasFailures = true;
+            results.listings = {
+              ...(storedResults.listings || {}),
+              errors: photoRetryErrors,
+            };
+            await updateStatus(migrationId, 'running', { results });
+          }
+        }
+      }
+
       continue;
     }
 
@@ -689,6 +751,10 @@ async function runMigration(migrationId) {
         failedCount,
         ...(skippedCount > 0 ? { skippedCount } : {}),
         ...(errors.length > 0 ? { errors: errors.slice(0, 20) } : {}),
+        // Persist the source→dest ID mapping so retries can restore it without
+        // re-creating already-migrated items (e.g., to retry failed photo uploads
+        // or remap IDs in dependent categories like reservations/tasks).
+        ...(Object.keys(idMap).length > 0 ? { idMap } : {}),
       };
 
       if (failedCount > 0) hasFailures = true;
