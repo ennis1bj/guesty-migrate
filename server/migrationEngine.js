@@ -125,15 +125,24 @@ const CATEGORIES = {
     create: (client, data) => client.createListing(data),
     idField: '_id',
     /**
-     * Channel-managed listings (Airbnb, Vrbo, Booking.com, etc.) cannot be
-     * created via the Guesty Open API — they must be reconnected through the
-     * OTA channel integration in the destination account. Skip them here so
-     * they show as 'skipped' rather than 'failed'.
+     * Channel-managed standalone listings (Airbnb, Vrbo, Booking.com, etc.)
+     * cannot be created via the Guesty Open API — they must be reconnected
+     * through the OTA channel integration in the destination account. Skip
+     * them here so they show as 'skipped' rather than 'failed'.
+     *
+     * MTL sub-units (complexId or parentId set) are the exception: even when
+     * channel-connected in the source, we create them as clean manual listings
+     * in the destination (SOURCE_ONLY_FIELDS strips their integrations before
+     * the POST). Their photos and calendar blocks should be preserved.
      */
-    filter: (item) => !(
-      Array.isArray(item.integrations) &&
-      item.integrations.some(i => i && (i.channelName || i.platform || i.channel))
-    ),
+    filter: (item) => {
+      const hasChannel = Array.isArray(item.integrations) &&
+        item.integrations.some(i => i && (i.channelName || i.platform || i.channel));
+      if (!hasChannel) return true; // no channel integration — always include
+      // Allow MTL sub-units through; they'll be created as manual listings
+      const isSubUnit = !!(item.complexId || item.parentId);
+      return isSubUnit;
+    },
     /**
      * Custom ordering: standalone first, then parents, then sub-units.
      * This ensures parentId can be remapped for sub-units.
@@ -705,9 +714,15 @@ async function runMigration(migrationId) {
             // Guesty's Open API v1 has no working separate photo upload endpoint.
             // Photos are included directly in the POST /listings create body
             // (via the pictures[] array) — Guesty handles them at creation time.
+            //
+            // We check the TRANSFORMED payload (not the source item) to decide
+            // whether photos will re-sync from a channel. SOURCE_ONLY_FIELDS
+            // always strips `integrations` before the POST, so every listing we
+            // create in the destination is a manual/non-channel listing — photos
+            // will never be re-synced and must be migrated explicitly.
             const pictures = item.pictures || [];
-            const includedCount = destClient.isChannelListing(item)
-              ? 0  // channel listings re-sync from channel on reconnect
+            const includedCount = destClient.isChannelListing(transformed)
+              ? 0  // destination listing still has a channel connection — skip photos
               : pictures.filter(p => extractPhotoUrl(p)).length;
             totalPhotos.found    += pictures.length;
             totalPhotos.migrated += includedCount;
@@ -851,8 +866,8 @@ async function runMigration(migrationId) {
   diffReport.photos = {
     found: totalPhotos.found,
     migrated: totalPhotos.migrated,
-    skipped_channel_managed: totalPhotos.skipped,
-    note: 'photos are included in the listing create body; Guesty processes them at creation time',
+    skipped: totalPhotos.skipped,
+    note: 'photos are included in the listing create body; Guesty processes them at creation time. MTL sub-units are migrated as manual listings so their photos are always included.',
   };
 
   const finalStatus = hasFailures ? 'complete_with_errors' : 'complete';
