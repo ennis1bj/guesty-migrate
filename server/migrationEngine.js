@@ -622,13 +622,15 @@ async function runMigration(migrationId) {
       const idMap = {};
 
       // MTL parent guard: skip any multi-unit parent that has no sub-units
-      // anywhere in the source account. This happens when all sub-units are
-      // channel-managed (Airbnb, Vrbo, etc.) — they're excluded from migration
-      // and can't be created via the API. Creating a parentless complex in the
-      // destination causes Guesty's UI to show "Oops" / 404.
+      // in the current migration set. Creating a parent without sub-units
+      // causes Guesty's UI to show "Oops" / 404.
+      // NOTE: intentionally checks sourceItems (the selected/filtered set),
+      // not rawItems — sub-units must be selected to count. If they're
+      // channel-managed but included in the selection, they're fine here
+      // because their integrations are already stripped by SOURCE_ONLY_FIELDS.
       if (category === 'listings') {
         const allSubUnitParentIds = new Set(
-          rawItems.filter(l => l.parentId).map(l => l.parentId)
+          sourceItems.filter(l => l.parentId).map(l => l.parentId)
         );
         const { parents: selectedParents } = classifyListings(sourceItems);
         const orphaned = selectedParents.filter(p => !allSubUnitParentIds.has(p._id));
@@ -639,11 +641,11 @@ async function runMigration(migrationId) {
             skippedCount++;
             errors.push({
               sourceId: p._id,
-              error: `Multi-unit parent "${p.title || p.nickname || p._id}" skipped — all sub-units are channel-managed (Airbnb, Vrbo, etc.) and cannot be migrated via the API. Reconnect the channel integration in your destination Guesty account to restore them.`,
+              error: `Multi-unit parent "${p.title || p.nickname || p._id}" skipped — no sub-units were selected or found in the source account. Guesty requires at least one sub-unit; add the sub-units to your selection and retry.`,
             });
           }
           hasFailures = true;
-          log.info(`Skipped ${orphaned.length} orphaned MTL parent(s) — all sub-units are channel-managed`);
+          log.info(`Skipped ${orphaned.length} orphaned MTL parent(s) — no sub-units selected or found`);
         }
       }
 

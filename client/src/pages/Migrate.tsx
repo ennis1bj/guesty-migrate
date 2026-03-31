@@ -28,16 +28,18 @@ interface ListingDetail {
   isChannelManaged?: boolean;
 }
 
-// Returns the IDs that can actually be migrated:
-//   - Excludes channel-managed listings (API can't touch them)
-//   - Excludes MTL parents whose sub-units are ALL channel-managed
-//     (creating a parent without sub-units breaks Guesty's UI)
+// Returns the IDs that can be migrated:
+//   - Includes channel-managed listings (cloned as direct, integrations stripped)
+//   - Excludes MTL parents with zero sub-units anywhere in the source
+//     (truly orphaned complexes would crash Guesty's UI)
 function selectableListingIds(details: ListingDetail[]): string[] {
-  const migratable = details.filter((l) => !l.isChannelManaged);
+  // All listings are selectable — channel-managed ones are cloned as direct
+  // listings (integrations stripped by the engine). Only exclude MTL parents
+  // that have zero sub-units anywhere in the source (truly orphaned).
   const hasSubUnit = new Set(
-    migratable.filter((l) => l.complexId).map((l) => l.complexId as string)
+    details.filter((l) => l.complexId).map((l) => l.complexId as string)
   );
-  return migratable
+  return details
     .filter((l) => l.type !== 'MTL' || hasSubUnit.has(l.id))
     .map((l) => l.id);
 }
@@ -640,7 +642,7 @@ export default function Migrate() {
       {currentStep === 2 && manifest && (() => {
         const rawDetails = ((manifest as Record<string, unknown>).listingDetails as ListingDetail[] | undefined) ?? [];
         const channelManagedCount = (manifest as Record<string, unknown>).channelManagedListings as number | undefined ?? rawDetails.filter(l => l.isChannelManaged).length;
-        const allDetails = rawDetails.filter(l => !l.isChannelManaged);
+        const allDetails = rawDetails; // channel-managed listings included — cloned as direct
         const uniqueCities = [...new Set(allDetails.map(l => l.city).filter((c): c is string => !!c))].sort();
         const q = listingSearch.toLowerCase().trim();
         const filtered = allDetails.filter(l => {
@@ -692,6 +694,9 @@ export default function Migrate() {
           if (l.type === 'ROOM') return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 flex-shrink-0">Room</span>;
           return null;
         };
+        const channelBadge = (l: ListingDetail) => l.isChannelManaged
+          ? <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 flex-shrink-0">Channel → Direct</span>
+          : null;
         const ListingRow = ({ listing, indent = false }: { listing: ListingDetail; indent?: boolean }) => (
           <label className={`flex items-center gap-3 px-3 py-2.5 hover:bg-stone-50 cursor-pointer border-b border-stone-100 last:border-0 ${indent ? 'pl-8 bg-stone-50/40' : ''} ${listing.isActive === false ? 'opacity-60' : ''}`}>
             <input type="checkbox" checked={selectedListingIds.includes(listing.id)}
@@ -701,6 +706,7 @@ export default function Migrate() {
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-sm text-slate-700 truncate">{listing.title}</span>
                 {typeBadge(listing)}
+                {channelBadge(listing)}
                 {listing.isActive === false && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-stone-100 text-stone-500 flex-shrink-0">Inactive</span>}
               </div>
               <p className="text-xs text-slate-400 truncate mt-0.5">
@@ -722,11 +728,11 @@ export default function Migrate() {
               <h2 className="text-xl font-bold text-slate-900 mb-1">Select Listings to Migrate</h2>
               <p className="text-slate-500 text-sm">All listings are selected by default. Uncheck any you want to exclude. Reservations, tasks, and saved replies will be automatically scoped to your selected listings.</p>
               {channelManagedCount > 0 && (
-                <div className="mt-4 flex items-start gap-3 p-3.5 bg-sky-50 border border-sky-200 rounded-xl text-sm">
-                  <svg className="w-4 h-4 text-sky-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 1 1 0 20A10 10 0 0 1 12 2z" /></svg>
-                  <p className="text-sky-800">
-                    <span className="font-semibold">{channelManagedCount.toLocaleString()} channel-managed {channelManagedCount === 1 ? 'listing is' : 'listings are'} not shown.</span>{' '}
-                    These are connected to external channels (Airbnb, Vrbo, Booking.com, etc.) and cannot be migrated via the API — they must be reconnected through the channel integration in your destination Guesty account.
+                <div className="mt-4 flex items-start gap-3 p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-sm">
+                  <svg className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 1 1 0 20A10 10 0 0 1 12 2z" /></svg>
+                  <p className="text-amber-900">
+                    <span className="font-semibold">{channelManagedCount.toLocaleString()} channel-managed {channelManagedCount === 1 ? 'listing' : 'listings'} (Airbnb, Vrbo, etc.)</span>{' '}
+                    will be cloned as direct listings — their channel connection will not transfer. You can reconnect the channel in your destination Guesty account after migration.
                   </p>
                 </div>
               )}
@@ -839,12 +845,13 @@ export default function Migrate() {
                               <div className="flex items-center gap-1.5 flex-wrap">
                                 <span className="text-sm font-semibold text-slate-800 truncate">{group.parent.title}</span>
                                 <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 flex-shrink-0">Multi-Unit</span>
+                                {channelBadge(group.parent)}
                                 {group.parent.isActive === false && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-stone-100 text-stone-500 flex-shrink-0">Inactive</span>}
                                 {noMigratableRooms && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 flex-shrink-0">Cannot migrate</span>}
                               </div>
                               <p className="text-xs text-slate-400 truncate">
                                 {noMigratableRooms
-                                  ? 'All sub-units are channel-managed — reconnect via channel integration in destination'
+                                  ? 'No sub-units found in source account — cannot migrate without at least 1 unit'
                                   : `${group.rooms.length} unit${group.rooms.length !== 1 ? 's' : ''}${[group.parent.city, group.parent.state].filter(Boolean).join(', ') ? ` · ${[group.parent.city, group.parent.state].filter(Boolean).join(', ')}` : ''}`
                                 }
                               </p>
