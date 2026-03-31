@@ -245,8 +245,12 @@ async function recoverStuckMigrations() {
     // ── 1. Mark long-running migrations as failed ──────────────────────────
     // Migrations stuck in 'running' for over an hour are orphaned — the engine
     // crashed mid-run.  Mark them failed so the user can retry.
+    // Use started_at (stamped when the engine claims the migration) rather than
+    // created_at (original creation date, months old for reprocessed migrations)
+    // so that server restarts don't immediately kill actively-running jobs.
     const runningResult = await pool.query(
-      "SELECT id FROM migrations WHERE status = 'running' AND created_at < NOW() - INTERVAL '1 hour'"
+      `SELECT id FROM migrations WHERE status = 'running'
+       AND COALESCE(started_at, created_at) < NOW() - INTERVAL '1 hour'`
     );
     for (const row of runningResult.rows) {
       logger.info(`Recovering stuck running migration ${row.id}`);

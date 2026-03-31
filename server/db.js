@@ -181,6 +181,15 @@ const migrate = async () => {
       ALTER TABLE migrations ADD COLUMN IF NOT EXISTS selected_listing_ids JSONB;
     `);
 
+    // ── Track when migration actually started running ─────────────────────
+    // created_at is the original creation date and can be months old for
+    // reprocessed migrations.  started_at is stamped when the engine sets
+    // status to 'running', giving the stuck-migration recovery an accurate
+    // age signal so server restarts don't immediately kill active runs.
+    await client.query(`
+      ALTER TABLE migrations ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
+    `);
+
     console.log('Database migrations completed successfully');
 
     // ── Auto-seed admin from environment variables ──────────────────────────
