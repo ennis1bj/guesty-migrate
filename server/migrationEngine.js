@@ -621,6 +621,32 @@ async function runMigration(migrationId) {
       const errors = [];
       const idMap = {};
 
+      // MTL parent guard: skip any multi-unit parent that has no sub-units
+      // anywhere in the source account. This happens when all sub-units are
+      // channel-managed (Airbnb, Vrbo, etc.) — they're excluded from migration
+      // and can't be created via the API. Creating a parentless complex in the
+      // destination causes Guesty's UI to show "Oops" / 404.
+      if (category === 'listings') {
+        const allSubUnitParentIds = new Set(
+          rawItems.filter(l => l.parentId).map(l => l.parentId)
+        );
+        const { parents: selectedParents } = classifyListings(sourceItems);
+        const orphaned = selectedParents.filter(p => !allSubUnitParentIds.has(p._id));
+        if (orphaned.length > 0) {
+          const orphanedIds = new Set(orphaned.map(p => p._id));
+          sourceItems = sourceItems.filter(l => !orphanedIds.has(l._id));
+          for (const p of orphaned) {
+            skippedCount++;
+            errors.push({
+              sourceId: p._id,
+              error: `Multi-unit parent "${p.title || p.nickname || p._id}" skipped — all sub-units are channel-managed (Airbnb, Vrbo, etc.) and cannot be migrated via the API. Reconnect the channel integration in your destination Guesty account to restore them.`,
+            });
+          }
+          hasFailures = true;
+          log.info(`Skipped ${orphaned.length} orphaned MTL parent(s) — all sub-units are channel-managed`);
+        }
+      }
+
       for (const item of sourceItems) {
         const sourceId = item[categoryDef.idField];
         try {

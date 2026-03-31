@@ -28,6 +28,20 @@ interface ListingDetail {
   isChannelManaged?: boolean;
 }
 
+// Returns the IDs that can actually be migrated:
+//   - Excludes channel-managed listings (API can't touch them)
+//   - Excludes MTL parents whose sub-units are ALL channel-managed
+//     (creating a parent without sub-units breaks Guesty's UI)
+function selectableListingIds(details: ListingDetail[]): string[] {
+  const migratable = details.filter((l) => !l.isChannelManaged);
+  const hasSubUnit = new Set(
+    migratable.filter((l) => l.complexId).map((l) => l.complexId as string)
+  );
+  return migratable
+    .filter((l) => l.type !== 'MTL' || hasSubUnit.has(l.id))
+    .map((l) => l.id);
+}
+
 const ALL_CATEGORIES = ['custom_fields', 'fees', 'listings', 'rate_strategies', 'guests', 'owners', 'saved_replies', 'reservations', 'tasks'];
 
 type PricingMode = 'flat_tier' | 'per_listing';
@@ -176,9 +190,7 @@ export default function Migrate() {
           applyManifestToCategories(data.manifest);
           setPricing(data.pricing);
           if (data.manifest?.listingDetails) {
-            const ids = (data.manifest.listingDetails as ListingDetail[])
-              .filter((l) => !l.isChannelManaged)
-              .map((l) => l.id);
+            const ids = selectableListingIds(data.manifest.listingDetails as ListingDetail[]);
             setAllListingIds(ids);
             setSelectedListingIds(ids);
           }
@@ -259,9 +271,7 @@ export default function Migrate() {
       applyManifestToCategories(data.manifest);
       setPricing(data.pricing);
       if (data.manifest?.listingDetails) {
-        const ids = (data.manifest.listingDetails as ListingDetail[])
-          .filter((l) => !l.isChannelManaged)
-          .map((l) => l.id);
+        const ids = selectableListingIds(data.manifest.listingDetails as ListingDetail[]);
         setAllListingIds(ids);
         setSelectedListingIds(ids);
       }
@@ -805,38 +815,44 @@ export default function Migrate() {
               ) : (
                 <>
                   {groups.map(group => {
+                    const noMigratableRooms = group.rooms.length === 0;
                     const groupIds = [group.parent.id, ...group.rooms.map(r => r.id)];
                     const allGroupSelected = groupIds.every(id => selectedListingIds.includes(id));
                     const someGroupSelected = groupIds.some(id => selectedListingIds.includes(id));
                     const isCollapsed = collapsedGroups.has(group.parent.id);
                     return (
-                      <div key={group.parent.id} className="border-b border-stone-100 last:border-0">
-                        <div className={`flex items-center gap-3 px-3 py-2.5 bg-stone-50 hover:bg-stone-100/60 border-b border-stone-100 ${group.parent.isActive === false ? 'opacity-60' : ''}`}>
-                          <input type="checkbox" checked={allGroupSelected}
-                            ref={el => { if (el) el.indeterminate = someGroupSelected && !allGroupSelected; }}
-                            onChange={() => toggleGroup(group)}
-                            className="w-4 h-4 text-amber-500 rounded border-stone-300 focus:ring-amber-500/30 flex-shrink-0" />
+                      <div key={group.parent.id} className={`border-b border-stone-100 last:border-0 ${noMigratableRooms ? 'opacity-60' : ''}`}>
+                        <div className={`flex items-center gap-3 px-3 py-2.5 bg-stone-50 border-b border-stone-100 ${!noMigratableRooms ? 'hover:bg-stone-100/60' : ''} ${group.parent.isActive === false ? 'opacity-75' : ''}`}>
+                          <input type="checkbox" checked={!noMigratableRooms && allGroupSelected} disabled={noMigratableRooms}
+                            ref={el => { if (el) el.indeterminate = !noMigratableRooms && someGroupSelected && !allGroupSelected; }}
+                            onChange={() => !noMigratableRooms && toggleGroup(group)}
+                            className="w-4 h-4 text-amber-500 rounded border-stone-300 focus:ring-amber-500/30 flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed" />
                           <button
-                            onClick={() => setCollapsedGroups(prev => { const next = new Set(prev); next.has(group.parent.id) ? next.delete(group.parent.id) : next.add(group.parent.id); return next; })}
-                            className="flex-1 text-left flex items-center gap-2 min-w-0">
-                            <svg className={`w-3.5 h-3.5 text-slate-400 flex-shrink-0 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                            </svg>
+                            onClick={() => !noMigratableRooms && setCollapsedGroups(prev => { const next = new Set(prev); next.has(group.parent.id) ? next.delete(group.parent.id) : next.add(group.parent.id); return next; })}
+                            className={`flex-1 text-left flex items-center gap-2 min-w-0 ${noMigratableRooms ? 'cursor-default' : ''}`}>
+                            {!noMigratableRooms && (
+                              <svg className={`w-3.5 h-3.5 text-slate-400 flex-shrink-0 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                              </svg>
+                            )}
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-1.5 flex-wrap">
                                 <span className="text-sm font-semibold text-slate-800 truncate">{group.parent.title}</span>
                                 <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 flex-shrink-0">Multi-Unit</span>
                                 {group.parent.isActive === false && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-stone-100 text-stone-500 flex-shrink-0">Inactive</span>}
+                                {noMigratableRooms && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 flex-shrink-0">Cannot migrate</span>}
                               </div>
                               <p className="text-xs text-slate-400 truncate">
-                                {group.rooms.length} unit{group.rooms.length !== 1 ? 's' : ''}
-                                {[group.parent.city, group.parent.state].filter(Boolean).join(', ') ? ` · ${[group.parent.city, group.parent.state].filter(Boolean).join(', ')}` : ''}
+                                {noMigratableRooms
+                                  ? 'All sub-units are channel-managed — reconnect via channel integration in destination'
+                                  : `${group.rooms.length} unit${group.rooms.length !== 1 ? 's' : ''}${[group.parent.city, group.parent.state].filter(Boolean).join(', ') ? ` · ${[group.parent.city, group.parent.state].filter(Boolean).join(', ')}` : ''}`
+                                }
                               </p>
                             </div>
                           </button>
                           <span className="text-xs text-slate-400 flex-shrink-0 font-mono">{group.parent.id.slice(-8)}</span>
                         </div>
-                        {!isCollapsed && group.rooms.map(room => <ListingRow key={room.id} listing={room} indent />)}
+                        {!isCollapsed && !noMigratableRooms && group.rooms.map(room => <ListingRow key={room.id} listing={room} indent />)}
                       </div>
                     );
                   })}
