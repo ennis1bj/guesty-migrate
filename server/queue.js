@@ -104,6 +104,15 @@ async function closeQueue(reason) {
 // ── Queue initialization ───────────────────────────────────────────────────────
 
 async function initQueue() {
+  // DISABLE_WORKER=true prevents this process from consuming BullMQ jobs.
+  // Set this in the dev environment so the dev server (which shares the same
+  // Redis as production) never races the production worker for jobs.
+  // The dev server will fall back to in-process execution for any local testing.
+  if (process.env.DISABLE_WORKER === 'true') {
+    logger.info('DISABLE_WORKER=true — BullMQ worker disabled, using in-process job execution');
+    return;
+  }
+
   if (!process.env.REDIS_URL) {
     logger.info('REDIS_URL not set — using in-process job execution');
     return;
