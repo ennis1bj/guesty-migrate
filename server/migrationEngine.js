@@ -498,7 +498,7 @@ async function runMigration(migrationId) {
   const idMaps = {};
   const results = {};
   let hasFailures = false;
-  const totalPhotos = { found: 0, migrated: 0, skipped: 0, failed: 0 };
+  const totalPhotos = { found: 0, migrated: 0, skipped: 0 };
 
   for (const category of MIGRATION_ORDER) {
     if (!selectedCategories.includes(category)) continue;
@@ -541,46 +541,9 @@ async function runMigration(migrationId) {
         idMaps[category] = storedIdMap;
       }
 
-      // Listings only: re-attempt photo uploads that failed in the prior run.
-      if (category === 'listings' && storedIdMap) {
-        const prevErrors = storedResults.listings?.errors || [];
-        const photoErrors = prevErrors.filter(e => e.photoUrl);
-        if (photoErrors.length > 0) {
-          log.info(`Retrying ${photoErrors.length} failed photo upload(s) from prior run`);
-          // Group photo errors by sourceId so we can batch per listing
-          const bySource = {};
-          for (const e of photoErrors) {
-            if (!bySource[e.sourceId]) bySource[e.sourceId] = [];
-            bySource[e.sourceId].push(e.photoUrl);
-          }
-          const photoRetryErrors = [];
-          for (const [sourceId, photoUrls] of Object.entries(bySource)) {
-            const destId = storedIdMap[sourceId];
-            if (!destId) continue; // no dest mapping — can't retry
-            for (const photoUrl of photoUrls) {
-              try {
-                await destClient.uploadListingPhoto(destId, photoUrl);
-                totalPhotos.migrated++;
-              } catch (photoErr) {
-                totalPhotos.failed++;
-                photoRetryErrors.push({
-                  sourceId,
-                  photoUrl,
-                  error: photoErr.response?.data?.message || photoErr.message,
-                });
-              }
-            }
-          }
-          if (photoRetryErrors.length > 0) {
-            hasFailures = true;
-            results.listings = {
-              ...(storedResults.listings || {}),
-              errors: photoRetryErrors,
-            };
-            await updateStatus(migrationId, 'running', { results });
-          }
-        }
-      }
+      // Photo retry no longer needed — photos are included in the listing
+      // create body (see pictures[] in POST /listings payload). Guesty's Open
+      // API v1 does not expose a working separate photo upload endpoint.
 
       continue;
     }
@@ -681,40 +644,18 @@ async function runMigration(migrationId) {
           }
           migratedCount++;
 
-          // Photo migration for listings
+          // Photo handling for listings
           if (category === 'listings') {
-            const photoStats = { found: 0, migrated: 0, skipped: 0, failed: 0 };
-
-            if (destClient.isChannelListing(item)) {
-              // Skip — channel will re-sync photos on reconnect
-              photoStats.skipped = (item.pictures || []).length;
-            } else {
-              const pictures = item.pictures || [];
-              photoStats.found = pictures.length;
-              for (const pic of pictures) {
-                const photoUrl = extractPhotoUrl(pic);
-                if (!photoUrl) {
-                  photoStats.skipped++;
-                  continue;
-                }
-                try {
-                  await destClient.uploadListingPhoto(newId, photoUrl);
-                  photoStats.migrated++;
-                } catch (photoErr) {
-                  photoStats.failed++;
-                  errors.push({
-                    sourceId: item[categoryDef.idField],
-                    photoUrl,
-                    error: photoErr.response?.data?.message || photoErr.message,
-                  });
-                }
-              }
-            }
-
-            totalPhotos.found += photoStats.found;
-            totalPhotos.migrated += photoStats.migrated;
-            totalPhotos.skipped += photoStats.skipped;
-            totalPhotos.failed += photoStats.failed;
+            // Guesty's Open API v1 has no working separate photo upload endpoint.
+            // Photos are included directly in the POST /listings create body
+            // (via the pictures[] array) — Guesty handles them at creation time.
+            const pictures = item.pictures || [];
+            const includedCount = destClient.isChannelListing(item)
+              ? 0  // channel listings re-sync from channel on reconnect
+              : pictures.filter(p => extractPhotoUrl(p)).length;
+            totalPhotos.found    += pictures.length;
+            totalPhotos.migrated += includedCount;
+            totalPhotos.skipped  += (pictures.length - includedCount);
 
             // Calendar block migration
             try {
@@ -855,7 +796,7 @@ async function runMigration(migrationId) {
     found: totalPhotos.found,
     migrated: totalPhotos.migrated,
     skipped_channel_managed: totalPhotos.skipped,
-    failed: totalPhotos.failed,
+    note: 'photos are included in the listing create body; Guesty processes them at creation time',
   };
 
   const finalStatus = hasFailures ? 'complete_with_errors' : 'complete';
