@@ -317,6 +317,32 @@ class GuestyClient {
   }
 
   /**
+   * Fetch the property IDs belonging to a complex using Guesty's dedicated
+   * complexes API:  GET /v1/properties-api/complexes/{complexId}
+   *
+   * This is the authoritative way to find all listings in a complex — the
+   * response includes a `propertyIds` array with every child listing ID.
+   * Returns [] if the endpoint is unavailable or the complex has no children.
+   */
+  async getComplexPropertyIds(complexId) {
+    if (!complexId) return [];
+    try {
+      const data = await this.request('GET', `/properties-api/complexes/${complexId}`);
+      const ids = data.propertyIds || data.listingIds || [];
+      if (Array.isArray(ids) && ids.length > 0) {
+        logger.info(`getComplexPropertyIds: complex ${complexId} has ${ids.length} propertyId(s)`);
+      }
+      return Array.isArray(ids) ? ids : [];
+    } catch (err) {
+      const status = err.response?.status;
+      if (status !== 404 && status !== 400 && status !== 403) {
+        logger.info(`getComplexPropertyIds: failed for ${complexId} (${status || err.message})`);
+      }
+      return [];
+    }
+  }
+
+  /**
    * Fetch all sub-units of an MTL listing using two complementary approaches:
    *   1. GET /listings?filters[parentId]={id} — returns sub-units that declare
    *      this listing as their parent (some Guesty plans honour parentId filter).

@@ -683,6 +683,28 @@ async function runMigration(migrationId) {
                   (migration.manifest?.channelManagedListings || 0)) || null;
 
               for (const wantedId of wantedComplexIds) {
+                // ── Complexes API (highest priority) ──────────────────────────
+                // GET /properties-api/complexes/{id} returns the complex object
+                // including a `propertyIds` array — the authoritative child list.
+                // This works even when the bulk /listings API omits complexId/
+                // parentId from MTL_CHILD listings.
+                const complexPropIds = await sourceClient.getComplexPropertyIds(wantedId);
+                if (complexPropIds.length > 0) {
+                  let addedByComplex = 0;
+                  for (const propId of complexPropIds) {
+                    if (!seenIds.has(propId)) {
+                      missingIds.add(propId);
+                      seenIds.add(propId);
+                      addedByComplex++;
+                    }
+                  }
+                  if (addedByComplex > 0) {
+                    log.info(`Pilot: found ${addedByComplex} sibling(s) via complexes API for ${wantedId}`);
+                  }
+                  continue;
+                }
+
+                // ── Fallback 1: Guesty complexId API filter with count-based trust ──
                 const filterResults = await sourceClient.getSubUnitsForParent(
                   wantedId,
                   { totalListingCount }
