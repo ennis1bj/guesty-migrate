@@ -574,24 +574,43 @@ async function runMigration(migrationId) {
           rawItems = await sourceClient.getListingsByIds(pilotListingIds);
           log.info(`Pilot: fetched ${rawItems.length}/${pilotListingIds.length} listings by ID`);
 
-          // ── Sub-unit auto-expansion ──────────────────────────────────────────
-          // For every selected listing, probe Guesty's complexId filter to find
-          // any sub-units that belong to it as a parent.  We do this regardless
-          // of listing type because Guesty accounts vary widely in how they label
-          // the parent (type may be 'MTL', 'MULTI_UNIT', or even 'STL' on some
-          // plans) — type-checking is unreliable.  For standalone listings the
-          // filter simply returns nothing; for parents it returns all sub-units.
-          // This is the only robust way to guarantee sub-units are always included
-          // when the parent was selected.
+          // ── Multi-unit family auto-expansion ─────────────────────────────────
+          // When a user selects one listing from a multi-unit property, we need to
+          // pull in ALL related units so nothing is left behind.  Guesty links units
+          // via complexId in two different ways depending on what the user selected:
+          //
+          //   Case A — user selected a PARENT (no complexId on the listing):
+          //     Query filters[complexId]=listing._id  →  finds all sub-units
+          //
+          //   Case B — user selected a SUB-UNIT (has complexId set):
+          //     Query filters[complexId]=listing.complexId  →  finds all siblings
+          //     (including potentially the selected unit itself; dedup handles it)
+          //
+          // For standalone (STL) listings neither query returns anything, so there
+          // is no overhead beyond one fast API call per selected listing.
           const seenIds = new Set(rawItems.map(r => r._id));
 
-          // Log listing types so we can diagnose future mismatches in prod logs.
+          // Log listing details for production diagnostics.
           for (const r of rawItems) {
             log.info(`Pilot listing: id=${r._id} type=${r.type} complexId=${r.complexId || 'none'} parentId=${r.parentId || 'none'}`);
           }
 
+          // Build the set of complexId values to probe — de-duped so we don't
+          // fire the same Guesty query twice if the user selected multiple units
+          // from the same complex.
+          const complexIdsToProbe = new Set();
+          for (const r of rawItems) {
+            if (r.complexId) {
+              // Sub-unit: probe using its parent's complex ID to find all siblings.
+              complexIdsToProbe.add(r.complexId);
+            } else {
+              // Potential parent: probe using its own ID to find its sub-units.
+              complexIdsToProbe.add(r._id);
+            }
+          }
+
           const subUnitArrays = await Promise.all(
-            rawItems.map(r => sourceClient.getSubUnitsForParent(r._id))
+            [...complexIdsToProbe].map(cid => sourceClient.getSubUnitsForParent(cid))
           );
           let autoAdded = 0;
           let parentsExpanded = 0;
@@ -606,9 +625,9 @@ async function runMigration(migrationId) {
             }
           }
           if (autoAdded > 0) {
-            log.info(`Pilot: auto-added ${autoAdded} sub-unit(s) from ${parentsExpanded} parent listing(s)`);
+            log.info(`Pilot: auto-added ${autoAdded} sibling/sub-unit(s) from ${parentsExpanded} complex(es)`);
           } else {
-            log.info(`Pilot: sub-unit probe returned 0 additional listings (all selected are standalone)`);
+            log.info(`Pilot: family probe returned 0 additional listings (standalone or already fully selected)`);
           }
 
         } else if (category === 'reservations' && pilotListingIds && migratedSrcIds.length) {
