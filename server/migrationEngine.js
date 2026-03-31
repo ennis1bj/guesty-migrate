@@ -616,6 +616,12 @@ async function runMigration(migrationId) {
           }
 
           const missingIds = new Set();
+          // knownParentId: subUnitId → parentMtlId
+          // Tracks the source MTL listing for each discovered sub-unit so we
+          // can stamp parentId on the fetched objects when Guesty's individual
+          // GET /listings/:id response also omits parentId (same bug as bulk).
+          const knownParentId = new Map();
+
           for (const r of rawItems) {
             const lookupKey = r.complexId || r._id; // sub-unit: use parent key; parent: use own id
             const members = complexGroups[lookupKey] || [];
@@ -623,6 +629,7 @@ async function runMigration(migrationId) {
               if (!seenIds.has(memberId)) {
                 missingIds.add(memberId);
                 seenIds.add(memberId);
+                knownParentId.set(memberId, r._id);
               }
             }
 
@@ -635,6 +642,7 @@ async function runMigration(migrationId) {
                 if (!seenIds.has(childId)) {
                   missingIds.add(childId);
                   seenIds.add(childId);
+                  knownParentId.set(childId, r._id);
                 }
               }
             }
@@ -649,6 +657,7 @@ async function runMigration(migrationId) {
                 if (!seenIds.has(subId)) {
                   missingIds.add(subId);
                   seenIds.add(subId);
+                  knownParentId.set(subId, r._id);
                   addedFromField++;
                 }
               }
@@ -773,6 +782,7 @@ async function runMigration(migrationId) {
                 if (subId && !seenIds.has(subId)) {
                   missingIds.add(subId);
                   seenIds.add(subId);
+                  knownParentId.set(subId, mtl._id);
                   added++;
                 }
               }
@@ -784,6 +794,26 @@ async function runMigration(migrationId) {
 
           if (missingIds.size > 0) {
             const siblings = await sourceClient.getListingsByIds([...missingIds]);
+
+            // ── Stamp parentId on sub-units that Guesty omits it from ─────────
+            // Guesty's GET /listings/:id (individual fetch) also returns MTL_CHILD
+            // listings with parentId=null — the same bug as the bulk API.  When we
+            // know a listing is a sub-unit of a specific MTL parent (recorded in
+            // knownParentId during sub-unit discovery above), stamp parentId so that:
+            //   1. classifyListings() correctly sorts them as sub-units (after parent)
+            //   2. The listing filter allows them through (isSubUnit = true)
+            //   3. transform() remaps parentId to the destination listing ID
+            let stamped = 0;
+            for (const s of siblings) {
+              if (!s.parentId && knownParentId.has(s._id)) {
+                s.parentId = knownParentId.get(s._id);
+                stamped++;
+              }
+            }
+            if (stamped > 0) {
+              log.info(`Pilot: stamped parentId on ${stamped} sub-unit(s) missing it from Guesty individual GET`);
+            }
+
             rawItems.push(...siblings);
             log.info(`Pilot: auto-added ${siblings.length} sibling/sub-unit(s) from manifest complexGroups`);
           } else {
