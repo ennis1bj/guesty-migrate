@@ -560,6 +560,10 @@ async function runMigration(migrationId) {
     try {
       log.info(`Migrating ${category}...`);
       let rawItems;
+      // Set by the auto-expansion block to include original + sibling IDs.
+      // The safety filter below uses this instead of selected_listing_ids so
+      // auto-added siblings are not stripped before the migration loop.
+      let effectivePilotIds = null;
       try {
         // ── Pilot-mode targeted fetches ──────────────────────────────────────
         // When selected_listing_ids is set we know exactly which records we need.
@@ -629,6 +633,10 @@ async function runMigration(migrationId) {
             log.info(`Pilot: no additional siblings in manifest (standalone listing or all units already selected)`);
           }
 
+          // Track the full set of IDs now in rawItems (original + auto-expanded)
+          // so the safety filter below does not strip the newly added siblings.
+          effectivePilotIds = new Set(rawItems.map(r => r._id));
+
         } else if (category === 'reservations' && pilotListingIds && migratedSrcIds.length) {
           // Fetch reservations only for the listings that were actually migrated.
           rawItems = await sourceClient.getReservationsByListingIds(migratedSrcIds);
@@ -666,8 +674,10 @@ async function runMigration(migrationId) {
 
       // Safety filter: keep only selected listings (no-op when getListingsByIds was
       // used above, but guards against unexpected extra items from the API).
+      // Use effectivePilotIds when set — it includes original selected IDs plus
+      // any siblings auto-expanded from complexGroups so they are not stripped here.
       if (category === 'listings' && migration.selected_listing_ids) {
-        const selectedIds = new Set(migration.selected_listing_ids);
+        const selectedIds = effectivePilotIds || new Set(migration.selected_listing_ids);
         sourceItems = sourceItems.filter(item => selectedIds.has(item._id));
         log.info(`Pilot mode: confirmed ${sourceItems.length} selected listings`);
       }
