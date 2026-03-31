@@ -669,8 +669,20 @@ export default function Migrate() {
           }
         };
         const sorted = [...filtered].sort(sortFn);
+
+        // Build a map of ALL sub-units per parent from the UNFILTERED list.
+        // This is used for selection so that toggling a group always selects/deselects
+        // ALL its sub-units — not just those visible under the current filter.
+        const allRoomsMap = new Map<string, ListingDetail[]>();
+        for (const l of allDetails) {
+          if (l.complexId) {
+            if (!allRoomsMap.has(l.complexId)) allRoomsMap.set(l.complexId, []);
+            allRoomsMap.get(l.complexId)!.push(l);
+          }
+        }
+
         const seenIds = new Set<string>();
-        type Group = { parent: ListingDetail; rooms: ListingDetail[] };
+        type Group = { parent: ListingDetail; rooms: ListingDetail[]; allRooms: ListingDetail[] };
         const groups: Group[] = [];
         const standalone: ListingDetail[] = [];
         for (const l of sorted) {
@@ -680,10 +692,14 @@ export default function Migrate() {
           // mistakenly treated as parents with 0 rooms, consuming seenIds before
           // the real parent gets a chance to collect its rooms.
           if (l.type === 'MTL' && !l.complexId && !seenIds.has(l.id)) {
+            // rooms: visible sub-units (filtered) — used for display only
             const rooms = sorted.filter(r => r.complexId === l.id && !seenIds.has(r.id));
-            groups.push({ parent: l, rooms });
+            // allRooms: ALL sub-units (unfiltered) — used for selection
+            const allRooms = allRoomsMap.get(l.id) ?? [];
+            groups.push({ parent: l, rooms, allRooms });
             seenIds.add(l.id);
             rooms.forEach(r => seenIds.add(r.id));
+            allRooms.forEach(r => seenIds.add(r.id));
           }
         }
         for (const l of sorted) {
@@ -693,7 +709,9 @@ export default function Migrate() {
         const allFilteredSelected = filteredIds.length > 0 && filteredIds.every(id => selectedListingIds.includes(id));
         const someFilteredSelected = filteredIds.some(id => selectedListingIds.includes(id));
         const toggleGroup = (group: Group) => {
-          const groupIds = [group.parent.id, ...group.rooms.map(r => r.id)];
+          // Always use allRooms (unfiltered) so toggling a group selects/deselects
+          // ALL sub-units, not just those visible under the current filter.
+          const groupIds = [group.parent.id, ...group.allRooms.map(r => r.id)];
           const allGroupSelected = groupIds.every(id => selectedListingIds.includes(id));
           setSelectedListingIds(prev => allGroupSelected ? prev.filter(id => !groupIds.includes(id)) : Array.from(new Set([...prev, ...groupIds])));
         };
@@ -829,11 +847,17 @@ export default function Migrate() {
               ) : (
                 <>
                   {groups.map(group => {
-                    const noMigratableRooms = group.rooms.length === 0;
-                    const groupIds = [group.parent.id, ...group.rooms.map(r => r.id)];
-                    const allGroupSelected = groupIds.every(id => selectedListingIds.includes(id));
-                    const someGroupSelected = groupIds.some(id => selectedListingIds.includes(id));
+                    // noMigratableRooms uses allRooms (unfiltered) so a group with
+                    // sub-units hidden by the current filter is still selectable.
+                    const noMigratableRooms = group.allRooms.length === 0;
+                    // Checkbox state uses allRooms so it reflects ALL sub-units,
+                    // not just the ones visible under the current filter.
+                    const allGroupIds = [group.parent.id, ...group.allRooms.map(r => r.id)];
+                    const allGroupSelected = allGroupIds.every(id => selectedListingIds.includes(id));
+                    const someGroupSelected = allGroupIds.some(id => selectedListingIds.includes(id));
                     const isCollapsed = collapsedGroups.has(group.parent.id);
+                    const totalUnits = group.allRooms.length;
+                    const visibleUnits = group.rooms.length;
                     return (
                       <div key={group.parent.id} className={`border-b border-stone-100 last:border-0 ${noMigratableRooms ? 'opacity-60' : ''}`}>
                         <div className={`flex items-center gap-3 px-3 py-2.5 bg-stone-50 border-b border-stone-100 ${!noMigratableRooms ? 'hover:bg-stone-100/60' : ''} ${group.parent.isActive === false ? 'opacity-75' : ''}`}>
@@ -860,7 +884,7 @@ export default function Migrate() {
                               <p className="text-xs text-slate-400 truncate">
                                 {noMigratableRooms
                                   ? 'No sub-units found in source account — cannot migrate without at least 1 unit'
-                                  : `${group.rooms.length} unit${group.rooms.length !== 1 ? 's' : ''}${[group.parent.city, group.parent.state].filter(Boolean).join(', ') ? ` · ${[group.parent.city, group.parent.state].filter(Boolean).join(', ')}` : ''}`
+                                  : `${totalUnits} unit${totalUnits !== 1 ? 's' : ''}${visibleUnits < totalUnits ? ` (${visibleUnits} shown)` : ''}${[group.parent.city, group.parent.state].filter(Boolean).join(', ') ? ` · ${[group.parent.city, group.parent.state].filter(Boolean).join(', ')}` : ''}`
                                 }
                               </p>
                             </div>
