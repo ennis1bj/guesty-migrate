@@ -908,7 +908,17 @@ async function runMigration(migrationId) {
       let failedCount = 0;
       let skippedCount = 0;
       const errors = [];
-      const idMap = {};
+
+      // Restore any partial idMap from a previous interrupted run so that
+      // re-runs can skip items already created in the destination account.
+      const partialStoredMap = storedResults[category]?.idMap;
+      const idMap = (partialStoredMap && typeof partialStoredMap === 'object')
+        ? { ...partialStoredMap }
+        : {};
+      if (Object.keys(idMap).length > 0) {
+        idMaps[category] = idMap;
+        log.info(`${category}: resuming with ${Object.keys(idMap).length} already-created item(s) from partial run`);
+      }
 
       // MTL parent guard: skip any multi-unit parent that has no sub-units
       // in the current migration set. Creating a parent without sub-units
@@ -941,6 +951,14 @@ async function runMigration(migrationId) {
       for (const item of sourceItems) {
         const sourceId = item[categoryDef.idField];
         try {
+          // Skip items already created in a previous interrupted run.
+          // idMap is pre-seeded from storedResults above so re-runs don't
+          // create duplicates when the engine was killed mid-loop.
+          if (sourceId && idMap[sourceId]) {
+            migratedCount++;
+            continue;
+          }
+
           // Skip items that don't pass the category filter
           if (categoryDef.filter && !categoryDef.filter(item)) {
             skippedCount++;
@@ -1001,6 +1019,15 @@ async function runMigration(migrationId) {
               }
             } catch (calErr) {
               // Non-fatal
+            }
+
+            // Incremental idMap checkpoint — save every 10 listings so that if
+            // the engine is killed mid-loop, a re-run can skip already-created
+            // items and avoid duplicating listings in the destination account.
+            if (migratedCount % 10 === 0) {
+              results[category] = { ...(results[category] || {}), idMap: { ...idMap } };
+              await updateStatus(migrationId, 'running', { results });
+              log.info(`listings: checkpoint saved — ${migratedCount} of ${sourceCount} mapped`);
             }
           }
         } catch (err) {

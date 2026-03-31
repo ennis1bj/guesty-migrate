@@ -250,7 +250,7 @@ async function recoverStuckMigrations() {
     // so that server restarts don't immediately kill actively-running jobs.
     const runningResult = await pool.query(
       `SELECT id FROM migrations WHERE status = 'running'
-       AND COALESCE(started_at, created_at) < NOW() - INTERVAL '1 hour'`
+       AND COALESCE(started_at, created_at) < NOW() - INTERVAL '4 hours'`
     );
     for (const row of runningResult.rows) {
       logger.info(`Recovering stuck running migration ${row.id}`);
