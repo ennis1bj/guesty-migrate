@@ -66,10 +66,28 @@ router.post('/preflight', async (req, res) => {
         (sum, l) => sum + (Array.isArray(l.pictures) ? l.pictures.length : 0), 0
       );
 
+      const listingDetails = allListings.map(l => ({
+        id:               l._id,
+        title:            l.title || l.nickname || `Listing ${l._id}`,
+        nickname:         l.nickname || null,
+        type:             l.type || 'STL',
+        complexId:        l.complexId || null,
+        city:             l.address?.city || null,
+        state:            l.address?.state || null,
+        country:          l.address?.country || null,
+        isActive:         l.active !== false,
+        isChannelManaged: Array.isArray(l.integrations) &&
+                          l.integrations.some(i => i && (i.channelName || i.platform || i.channel)),
+      }));
+
+      const migratableListings   = listingDetails.filter(l => !l.isChannelManaged);
+      const channelManagedCount  = listingDetails.length - migratableListings.length;
+
       manifest = {
         custom_fields: customFields,
         fees,
-        listings: allListings.length,
+        listings: migratableListings.length,
+        channelManagedListings: channelManagedCount,
         rate_strategies: rateStrategies,
         reservations,
         guests,
@@ -77,17 +95,7 @@ router.post('/preflight', async (req, res) => {
         saved_replies: savedReplies,
         tasks,
         photos: photoCount,
-        listingDetails: allListings.map(l => ({
-          id:        l._id,
-          title:     l.title || l.nickname || `Listing ${l._id}`,
-          nickname:  l.nickname || null,
-          type:      l.type || 'STL',
-          complexId: l.complexId || null,
-          city:      l.address?.city || null,
-          state:     l.address?.state || null,
-          country:   l.address?.country || null,
-          isActive:  l.active !== false,
-        })),
+        listingDetails,
         pricing_snapshot_available: true,
       };
     } catch (err) {

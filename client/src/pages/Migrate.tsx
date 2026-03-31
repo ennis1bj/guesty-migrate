@@ -25,6 +25,7 @@ interface ListingDetail {
   state?: string | null;
   country?: string | null;
   isActive?: boolean;
+  isChannelManaged?: boolean;
 }
 
 const ALL_CATEGORIES = ['custom_fields', 'fees', 'listings', 'rate_strategies', 'guests', 'owners', 'saved_replies', 'reservations', 'tasks'];
@@ -175,7 +176,9 @@ export default function Migrate() {
           applyManifestToCategories(data.manifest);
           setPricing(data.pricing);
           if (data.manifest?.listingDetails) {
-            const ids = (data.manifest.listingDetails as ListingDetail[]).map((l) => l.id);
+            const ids = (data.manifest.listingDetails as ListingDetail[])
+              .filter((l) => !l.isChannelManaged)
+              .map((l) => l.id);
             setAllListingIds(ids);
             setSelectedListingIds(ids);
           }
@@ -256,7 +259,9 @@ export default function Migrate() {
       applyManifestToCategories(data.manifest);
       setPricing(data.pricing);
       if (data.manifest?.listingDetails) {
-        const ids = (data.manifest.listingDetails as ListingDetail[]).map((l) => l.id);
+        const ids = (data.manifest.listingDetails as ListingDetail[])
+          .filter((l) => !l.isChannelManaged)
+          .map((l) => l.id);
         setAllListingIds(ids);
         setSelectedListingIds(ids);
       }
@@ -623,7 +628,9 @@ export default function Migrate() {
 
       {/* Step 2: Select Listings */}
       {currentStep === 2 && manifest && (() => {
-        const allDetails = ((manifest as Record<string, unknown>).listingDetails as ListingDetail[] | undefined) ?? [];
+        const rawDetails = ((manifest as Record<string, unknown>).listingDetails as ListingDetail[] | undefined) ?? [];
+        const channelManagedCount = (manifest as Record<string, unknown>).channelManagedListings as number | undefined ?? rawDetails.filter(l => l.isChannelManaged).length;
+        const allDetails = rawDetails.filter(l => !l.isChannelManaged);
         const uniqueCities = [...new Set(allDetails.map(l => l.city).filter((c): c is string => !!c))].sort();
         const q = listingSearch.toLowerCase().trim();
         const filtered = allDetails.filter(l => {
@@ -704,6 +711,15 @@ export default function Migrate() {
             <div className="p-8 pb-4">
               <h2 className="text-xl font-bold text-slate-900 mb-1">Select Listings to Migrate</h2>
               <p className="text-slate-500 text-sm">All listings are selected by default. Uncheck any you want to exclude. Reservations, tasks, and saved replies will be automatically scoped to your selected listings.</p>
+              {channelManagedCount > 0 && (
+                <div className="mt-4 flex items-start gap-3 p-3.5 bg-sky-50 border border-sky-200 rounded-xl text-sm">
+                  <svg className="w-4 h-4 text-sky-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 1 1 0 20A10 10 0 0 1 12 2z" /></svg>
+                  <p className="text-sky-800">
+                    <span className="font-semibold">{channelManagedCount.toLocaleString()} channel-managed {channelManagedCount === 1 ? 'listing is' : 'listings are'} not shown.</span>{' '}
+                    These are connected to external channels (Airbnb, Vrbo, Booking.com, etc.) and cannot be migrated via the API — they must be reconnected through the channel integration in your destination Guesty account.
+                  </p>
+                </div>
+              )}
             </div>
             <div className="px-8 py-4 border-t border-stone-100">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
