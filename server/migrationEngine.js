@@ -148,13 +148,43 @@ const CATEGORIES = {
       if (cleaned.parentId && maps.listings) {
         cleaned.parentId = maps.listings[cleaned.parentId] || cleaned.parentId;
       }
-      // yieldManagement embeds account-specific rateStrategy references whose
-      // _id values are stripped by stripFieldsDeep, causing Guesty's API to
-      // return "yieldManagement.rateStrategy._id: Path `_id` is required".
-      // Rate strategy IDs can't transfer between accounts anyway, so drop the
-      // whole block — the destination account will apply its own defaults.
-      delete cleaned.yieldManagement;
-      delete cleaned.rateStrategy;
+
+      // rateStrategy references embed account-specific _id values that
+      // stripFieldsDeep removes, causing Guesty's API to return
+      // "rateStrategy._id: Path `_id` is required" when the object is present
+      // but empty. Strategy:
+      //   1. Try to remap using the migrated rate_strategies idMap.
+      //   2. If no mapping exists, delete just the rateStrategy key —
+      //      NOT the whole yieldManagement block — so Guesty's detail page
+      //      can still access listing.yieldManagement without crashing.
+      const remapRateStrategyRef = (sourceRef, destRef) => {
+        if (!sourceRef || !destRef) return;
+        const sourceId = sourceRef._id; // read from original item before strip
+        const destId = sourceId && maps.rate_strategies?.[sourceId];
+        if (destId) {
+          destRef._id = destId; // restore with remapped destination ID
+        } else {
+          return 'DELETE'; // signal: remove the reference entirely
+        }
+      };
+
+      // Top-level rateStrategy
+      if (item.rateStrategy) {
+        const action = remapRateStrategyRef(item.rateStrategy, cleaned.rateStrategy);
+        if (action === 'DELETE') delete cleaned.rateStrategy;
+      }
+
+      // yieldManagement.rateStrategy — drop only the nested ref, keep the block
+      if (item.yieldManagement?.rateStrategy) {
+        const action = remapRateStrategyRef(
+          item.yieldManagement.rateStrategy,
+          cleaned.yieldManagement?.rateStrategy
+        );
+        if (action === 'DELETE' && cleaned.yieldManagement) {
+          delete cleaned.yieldManagement.rateStrategy;
+        }
+      }
+
       return cleaned;
     },
   },
