@@ -611,6 +611,19 @@ async function runMigration(migrationId) {
           // Log listing details for production diagnostics.
           for (const r of rawItems) {
             log.info(`Pilot listing: id=${r._id} type=${r.type} complexId=${r.complexId || 'none'} parentId=${r.parentId || 'none'}`);
+            // Log all top-level keys so we can identify any sibling/unit reference fields
+            log.info(`Pilot listing keys: ${Object.keys(r).sort().join(', ')}`);
+            // Log any array/object fields that might reference sibling units
+            const arrayFields = Object.entries(r)
+              .filter(([, v]) => Array.isArray(v) && v.length > 0)
+              .map(([k, v]) => `${k}[${v.length}]`);
+            if (arrayFields.length > 0) log.info(`Pilot listing arrays: ${arrayFields.join(', ')}`);
+            // Log any fields whose names suggest sibling/complex relationships
+            const relFields = ['units', 'subUnits', 'rooms', 'children', 'siblings',
+              'relatedListings', 'multiUnit', 'groupId', 'listing', 'complex'];
+            for (const f of relFields) {
+              if (r[f] !== undefined) log.info(`Pilot listing field ${f}: ${JSON.stringify(r[f]).slice(0, 200)}`);
+            }
           }
 
           const missingIds = new Set();
