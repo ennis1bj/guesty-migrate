@@ -108,6 +108,26 @@ const CATEGORIES = {
     getAll: (client) => client.getAllCustomFields(),
     create: (client, data) => client.createCustomField(data),
     idField: '_id',
+    transform: (item) => {
+      // Whitelist only the fields Guesty's create endpoint accepts.
+      // Sending the raw GET response causes their server to throw
+      // "Cannot read properties of undefined (reading 'map')" (500) —
+      // most likely because their handler calls .map() on `options`
+      // when other unexpected fields are present or options is absent.
+      // options is passed as-is from the source (not run through
+      // stripFieldsDeep) so select/multiSelect types keep their values.
+      const payload = {};
+      if (item.fieldName   != null) payload.fieldName   = item.fieldName;
+      if (item.fieldType   != null) payload.fieldType   = item.fieldType;
+      if (item.scope       != null) payload.scope       = item.scope;
+      if (item.description != null) payload.description = item.description;
+      if (item.required    != null) payload.required    = item.required;
+      if (item.defaultValue != null) payload.defaultValue = item.defaultValue;
+      // Always supply options as an array — Guesty's handler unconditionally
+      // calls .map() on it for select/multiSelect types.
+      payload.options = Array.isArray(item.options) ? item.options : [];
+      return payload;
+    },
   },
   fees: {
     getAll: (client) => client.getAllFees(),
@@ -142,6 +162,13 @@ const CATEGORIES = {
       if (cleaned.parentId && maps.listings) {
         cleaned.parentId = maps.listings[cleaned.parentId] || cleaned.parentId;
       }
+      // yieldManagement embeds account-specific rateStrategy references whose
+      // _id values are stripped by stripFieldsDeep, causing Guesty's API to
+      // return "yieldManagement.rateStrategy._id: Path `_id` is required".
+      // Rate strategy IDs can't transfer between accounts anyway, so drop the
+      // whole block — the destination account will apply its own defaults.
+      delete cleaned.yieldManagement;
+      delete cleaned.rateStrategy;
       return cleaned;
     },
   },
