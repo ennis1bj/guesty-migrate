@@ -916,9 +916,12 @@ async function runMigration(migrationId) {
         ? { ...partialStoredMap }
         : {};
       if (Object.keys(idMap).length > 0) {
-        idMaps[category] = idMap;
         log.info(`${category}: resuming with ${Object.keys(idMap).length} already-created item(s) from partial run`);
       }
+      // Always assign idMaps[category] = idMap by reference BEFORE the creation
+      // loop so that transform() can remap parentId using live entries as they
+      // are added (e.g. MTL parent created first → sub-units see its dest ID).
+      idMaps[category] = idMap;
 
       // MTL parent guard: skip any multi-unit parent that has no sub-units
       // in the current migration set. Creating a parent without sub-units
@@ -998,32 +1001,10 @@ async function runMigration(migrationId) {
             totalPhotos.migrated += includedCount;
             totalPhotos.skipped  += (pictures.length - includedCount);
 
-            // Calendar block migration
-            try {
-              const blocks = await sourceClient.getListingCalendarBlocks(sourceId);
-              if (blocks.length > 0) {
-                const ranges = groupContiguousDays(blocks);
-                for (const range of ranges) {
-                  try {
-                    await destClient.blockListingCalendar(newId, range.start, range.end, range.note);
-                  } catch (blockErr) {
-                    // Non-fatal — log but continue
-                    errors.push({
-                      sourceId,
-                      type: 'calendar_block',
-                      range,
-                      error: blockErr.message,
-                    });
-                  }
-                }
-              }
-            } catch (calErr) {
-              // Non-fatal
-            }
-
             // Incremental idMap checkpoint — save every 10 listings so that if
             // the engine is killed mid-loop, a re-run can skip already-created
             // items and avoid duplicating listings in the destination account.
+            // Calendar block migration runs in a parallel post-creation phase.
             if (migratedCount % 10 === 0) {
               results[category] = { ...(results[category] || {}), idMap: { ...idMap } };
               await updateStatus(migrationId, 'running', { results });
@@ -1063,6 +1044,33 @@ async function runMigration(migrationId) {
             status: err.response?.status,
           });
         }
+      }
+
+      // ── Parallel calendar block migration (listings only) ─────────────────
+      // Runs after the creation loop so every parent and sub-unit ID is in
+      // idMap before we start.  Uses Promise.allSettled so one failure doesn't
+      // cancel the rest.  The semaphore in guestyClient caps at 5 concurrent
+      // Guesty API calls; calendar blocks are non-fatal if they fail.
+      if (category === 'listings') {
+        const calPairs = Object.entries(idMap); // [[srcId, destId], ...]
+        log.info(`listings: migrating calendar blocks for ${calPairs.length} listing(s) in parallel`);
+        await Promise.allSettled(
+          calPairs.map(async ([srcId, destId]) => {
+            try {
+              const blocks = await sourceClient.getListingCalendarBlocks(srcId);
+              if (!blocks.length) return;
+              const ranges = groupContiguousDays(blocks);
+              for (const range of ranges) {
+                try {
+                  await destClient.blockListingCalendar(destId, range.start, range.end, range.note);
+                } catch (blockErr) {
+                  errors.push({ sourceId: srcId, type: 'calendar_block', range, error: blockErr.message });
+                }
+              }
+            } catch { /* Non-fatal — listing was created, calendar blocks best-effort */ }
+          })
+        );
+        log.info(`listings: calendar block migration complete`);
       }
 
       idMaps[category] = idMap;
