@@ -342,8 +342,6 @@ class GuestyClient {
   }
 
   async uploadListingPhoto(listingId, photoUrl) {
-    const token = await this.getAccessToken();
-
     // Validate the photo URL is an HTTP(S) URL to mitigate SSRF
     let parsedUrl;
     try {
@@ -365,45 +363,11 @@ class GuestyClient {
       throw new Error(`Photo URL hostname blocked (private/internal): ${hostname}`);
     }
 
-    // Download image with 15s timeout
-    let imageResponse;
+    // Use Guesty's URL-import endpoint — pass the source URL and let Guesty
+    // fetch the image itself. This avoids the binary download+multipart approach
+    // that hit 404 on POST /pictures/upload in the Open API v1.
     try {
-      imageResponse = await axios.get(photoUrl, {
-        responseType: 'arraybuffer',
-        timeout: 15000,
-        maxRedirects: 3,
-      });
-    } catch (downloadErr) {
-      throw new Error(`Failed to download photo from ${photoUrl}: ${downloadErr.message}`);
-    }
-
-    const contentType = imageResponse.headers['content-type'] || 'image/jpeg';
-    // Validate content type is actually an image
-    if (!contentType.startsWith('image/')) {
-      throw new Error(`Photo URL returned non-image content type: ${contentType}`);
-    }
-    const ext = contentType.split('/')[1]?.split(';')[0] || 'jpg';
-    const filename = `photo_${Date.now()}.${ext}`;
-
-    const form = new FormData();
-    form.append('picture', Buffer.from(imageResponse.data), {
-      filename,
-      contentType,
-    });
-
-    try {
-      const response = await axios.post(
-        `${BASE_URL}/listings/${listingId}/pictures/upload`,
-        form,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            ...form.getHeaders(),
-          },
-          timeout: 30000,
-        }
-      );
-      return response.data;
+      return await this.request('POST', `/listings/${listingId}/pictures`, { url: photoUrl });
     } catch (uploadErr) {
       const status = uploadErr.response?.status;
       throw new Error(`Photo upload to listing ${listingId} failed (${status || 'network error'}): ${uploadErr.message}`);

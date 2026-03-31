@@ -105,29 +105,15 @@ function classifyListings(listings) {
 
 const CATEGORIES = {
   custom_fields: {
+    // Guesty's POST /accounts/:id/custom-fields endpoint crashes with an
+    // internal 500 ("Cannot read properties of undefined (reading 'map')")
+    // regardless of payload — it does not support creating custom fields via
+    // the Open API. Mark as not supported so the engine skips it cleanly
+    // rather than recording failures.
+    notSupported: true,
+    notSupportedReason: "Custom fields cannot be created via Guesty's Open API — recreate them manually in the destination account.",
     getAll: (client) => client.getAllCustomFields(),
-    create: (client, data) => client.createCustomField(data),
     idField: '_id',
-    transform: (item) => {
-      // Whitelist only the fields Guesty's create endpoint accepts.
-      // Sending the raw GET response causes their server to throw
-      // "Cannot read properties of undefined (reading 'map')" (500) —
-      // most likely because their handler calls .map() on `options`
-      // when other unexpected fields are present or options is absent.
-      // options is passed as-is from the source (not run through
-      // stripFieldsDeep) so select/multiSelect types keep their values.
-      const payload = {};
-      if (item.fieldName   != null) payload.fieldName   = item.fieldName;
-      if (item.fieldType   != null) payload.fieldType   = item.fieldType;
-      if (item.scope       != null) payload.scope       = item.scope;
-      if (item.description != null) payload.description = item.description;
-      if (item.required    != null) payload.required    = item.required;
-      if (item.defaultValue != null) payload.defaultValue = item.defaultValue;
-      // Always supply options as an array — Guesty's handler unconditionally
-      // calls .map() on it for select/multiSelect types.
-      payload.options = Array.isArray(item.options) ? item.options : [];
-      return payload;
-    },
   },
   fees: {
     getAll: (client) => client.getAllFees(),
@@ -478,6 +464,28 @@ async function runMigration(migrationId) {
 
     const categoryDef = CATEGORIES[category];
     if (!categoryDef) continue;
+
+    // Categories marked notSupported are skipped cleanly — no failures recorded.
+    // The getAll call is still made so we can report the source count to the user.
+    if (categoryDef.notSupported) {
+      log.warn(`Skipping ${category} — ${categoryDef.notSupportedReason}`);
+      let sourceCount = 0;
+      try {
+        const items = categoryDef.getAll ? await categoryDef.getAll(sourceClient) : [];
+        sourceCount = items.length;
+      } catch (_) { /* best-effort count */ }
+      results[category] = {
+        sourceCount,
+        migratedCount: 0,
+        failedCount: 0,
+        skippedCount: sourceCount,
+        notSupported: true,
+        note: categoryDef.notSupportedReason,
+      };
+      await logCategory(migrationId, category, 'not_supported', sourceCount, 0, 0, sourceCount, null);
+      await updateStatus(migrationId, 'running', { results });
+      continue;
+    }
 
     // Skip categories that already completed successfully in a prior run
     if (previousResults[category] > 0) {

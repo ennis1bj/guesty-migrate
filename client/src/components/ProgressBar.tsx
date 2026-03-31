@@ -13,6 +13,7 @@ export default function ProgressBar({ label, current, total, status }: ProgressB
     partial: 'bg-yellow-500',
     failed: 'bg-red-500',
     running: 'bg-amber-500',
+    not_supported: 'bg-slate-300',
   }[status] || 'bg-slate-400';
 
   const statusBadge = {
@@ -20,7 +21,12 @@ export default function ProgressBar({ label, current, total, status }: ProgressB
     partial: 'bg-yellow-100 text-yellow-800',
     failed: 'bg-red-100 text-red-800',
     running: 'bg-amber-100 text-amber-800',
+    not_supported: 'bg-slate-100 text-slate-600',
   }[status] || 'bg-stone-100 text-slate-700';
+
+  const statusLabel = {
+    not_supported: 'not supported',
+  }[status] || status;
 
   return (
     <div className="mb-4">
@@ -28,7 +34,7 @@ export default function ProgressBar({ label, current, total, status }: ProgressB
         <div className="flex items-center space-x-2">
           <span className="text-sm font-semibold text-slate-700 capitalize">{label.replace(/_/g, ' ')}</span>
           <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${statusBadge}`}>
-            {status}
+            {statusLabel}
           </span>
         </div>
         <span className="text-sm text-slate-400 font-mono">
