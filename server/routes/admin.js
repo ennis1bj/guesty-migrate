@@ -245,6 +245,40 @@ router.post('/migrations/:id/cancel', async (req, res) => {
   }
 });
 
+// ── POST /api/admin/migrations/:id/reprocess — update selection & re-queue ──
+
+router.post('/migrations/:id/reprocess', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { selectedListingIds } = req.body;
+    if (!Array.isArray(selectedListingIds) || selectedListingIds.length === 0) {
+      return res.status(400).json({ error: 'selectedListingIds must be a non-empty array' });
+    }
+    const result = await pool.query(
+      `UPDATE migrations
+       SET selected_listing_ids = $1,
+           status = 'paid',
+           results = NULL,
+           error_message = NULL,
+           completed_at = NULL,
+           retry_count = 0
+       WHERE id = $2
+       RETURNING id, status, selected_listing_ids`,
+      [JSON.stringify(selectedListingIds), id]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Migration not found' });
+    }
+    const { enqueueMigration } = require('../queue');
+    await enqueueMigration(id, { priority: 1 });
+    logger.info('Migration reprocessed by admin', { migrationId: id, adminId: req.user.id, listingCount: selectedListingIds.length });
+    res.json({ ok: true, migration: result.rows[0] });
+  } catch (err) {
+    logger.error('Admin reprocess migration error', { error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ── GET /api/admin/users/search — search users by email ─────────────────────
 
 router.get('/users/search', async (req, res) => {
