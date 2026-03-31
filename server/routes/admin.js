@@ -269,6 +269,9 @@ router.post('/migrations/:id/reprocess', async (req, res) => {
     if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Migration not found' });
     }
+    // Clear migration_logs so the engine does not skip categories it sees
+    // as "already migrated in prior run" — reprocess must run everything fresh.
+    await pool.query('DELETE FROM migration_logs WHERE migration_id = $1', [id]);
     const { enqueueMigration } = require('../queue');
     await enqueueMigration(id, { priority: 1 });
     logger.info('Migration reprocessed by admin', { migrationId: id, adminId: req.user.id, listingCount: selectedListingIds.length });
