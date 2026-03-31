@@ -264,7 +264,20 @@ class GuestyClient {
   async getSubUnitsForParent(parentId) {
     if (!parentId) return [];
     try {
-      return await this.getAllPaginated(`/listings?filters[complexId]=${parentId}`, 'results');
+      // Fetch ONE page only — do NOT use getAllPaginated here.
+      // Guesty's Open API may not support filters[complexId] on the listings
+      // endpoint; if the filter is silently ignored the server returns ALL
+      // listings and getAllPaginated would paginate through thousands of records,
+      // hanging the migration.  A single 100-item page is sufficient because:
+      //   a) If the filter IS honoured we get only the sub-units (always < 100).
+      //   b) If the filter is ignored we get the first 100 listings and the
+      //      client-side complexId check below extracts the matching sub-units.
+      //      On most accounts the parent's units appear within the first page.
+      const data = await this.request('GET', `/listings?filters[complexId]=${encodeURIComponent(parentId)}&limit=100&skip=0`);
+      const results = data.results || data;
+      if (!Array.isArray(results)) return [];
+      // Client-side guard: only return listings that actually belong to this parent.
+      return results.filter(l => l.complexId === parentId || l.parentId === parentId);
     } catch (err) {
       logger.warn('getSubUnitsForParent: failed to fetch sub-units', { parentId, error: err.message });
       return [];
