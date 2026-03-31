@@ -552,10 +552,36 @@ async function runMigration(migrationId) {
       log.info(`Migrating ${category}...`);
       let rawItems;
       try {
-        // getAll is optional — pricing_snapshot has no independent data source
-        rawItems = categoryDef.getAll
-          ? await categoryDef.getAll(sourceClient)
-          : [];
+        // ── Pilot-mode targeted fetches ──────────────────────────────────────
+        // When selected_listing_ids is set we know exactly which records we need.
+        // Fetching only those records is orders of magnitude faster than paging
+        // through the entire account catalogue and discarding most of it.
+        const pilotListingIds = migration.selected_listing_ids;
+        const migratedSrcIds  = idMaps.listings ? Object.keys(idMaps.listings) : [];
+
+        if (category === 'listings' && pilotListingIds?.length) {
+          // Fetch each selected listing directly by ID in parallel.
+          // Replaces getAllListings() which pages through every listing on the account.
+          rawItems = await sourceClient.getListingsByIds(pilotListingIds);
+          log.info(`Pilot: fetched ${rawItems.length}/${pilotListingIds.length} listings by ID`);
+
+        } else if (category === 'reservations' && pilotListingIds && migratedSrcIds.length) {
+          // Fetch reservations only for the listings that were actually migrated.
+          rawItems = await sourceClient.getReservationsByListingIds(migratedSrcIds);
+          log.info(`Pilot: fetched ${rawItems.length} reservations for ${migratedSrcIds.length} listing(s)`);
+
+        } else if (category === 'tasks' && pilotListingIds && migratedSrcIds.length) {
+          // Fetch tasks only for the listings that were actually migrated.
+          rawItems = await sourceClient.getTasksByListingIds(migratedSrcIds);
+          log.info(`Pilot: fetched ${rawItems.length} tasks for ${migratedSrcIds.length} listing(s)`);
+
+        } else {
+          // Full-account fetch for non-pilot migrations and account-level categories
+          // (fees, owners, guests, saved_replies, rate_strategies, custom_fields).
+          rawItems = categoryDef.getAll
+            ? await categoryDef.getAll(sourceClient)
+            : [];
+        }
       } catch (fetchErr) {
         const status = fetchErr.response?.status;
         if (status === 404 || status === 400) {
@@ -574,14 +600,16 @@ async function runMigration(migrationId) {
         sourceItems = categoryDef.sortItems(sourceItems);
       }
 
-      // Pilot mode: filter listings by selected IDs
+      // Safety filter: keep only selected listings (no-op when getListingsByIds was
+      // used above, but guards against unexpected extra items from the API).
       if (category === 'listings' && migration.selected_listing_ids) {
         const selectedIds = new Set(migration.selected_listing_ids);
         sourceItems = sourceItems.filter(item => selectedIds.has(item._id));
-        log.info(`Pilot mode: filtered to ${sourceItems.length} selected listings`);
+        log.info(`Pilot mode: confirmed ${sourceItems.length} selected listings`);
       }
 
-      // Pilot mode: scope dependent categories to migrated listings
+      // Safety filter: scope dependent categories to migrated listings (no-op when
+      // the targeted fetch was used above, kept for non-listings-filtered paths).
       const LISTING_DEPENDENT_CATEGORIES = ['reservations', 'tasks', 'saved_replies'];
       if (LISTING_DEPENDENT_CATEGORIES.includes(category) && migration.selected_listing_ids && idMaps.listings) {
         const migratedListingIds = new Set(Object.keys(idMaps.listings));

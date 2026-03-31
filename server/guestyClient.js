@@ -256,8 +256,49 @@ class GuestyClient {
     return this.getAllPaginated('/listings', 'results');
   }
 
+  /**
+   * Fetch a specific set of listings directly by their IDs in parallel.
+   * Use this instead of getAllListings() for pilot migrations — on large accounts
+   * getAllListings() pages through hundreds of records just to discard most of them.
+   * Individual GET /listings/:id requests are fast and return the full listing object.
+   */
+  async getListingsByIds(ids) {
+    if (!ids || ids.length === 0) return [];
+    const settled = await Promise.allSettled(
+      ids.map(id => this.request('GET', `/listings/${id}`))
+    );
+    const results = [];
+    for (const r of settled) {
+      if (r.status === 'fulfilled' && r.value) {
+        results.push(r.value);
+      } else if (r.status === 'rejected') {
+        logger.warn('getListingsByIds: failed to fetch listing', { error: r.reason?.message });
+      }
+    }
+    return results;
+  }
+
   async getAllReservations() {
     return this.getAllPaginated('/reservations', 'results');
+  }
+
+  /**
+   * Fetch reservations for a specific set of listing IDs.
+   * Avoids pulling the entire account's reservation history when only a
+   * handful of listings were migrated.
+   */
+  async getReservationsByListingIds(listingIds) {
+    if (!listingIds || listingIds.length === 0) return [];
+    const settled = await Promise.allSettled(
+      listingIds.map(id =>
+        this.getAllPaginated(`/reservations?filters[listingId]=${id}`, 'results')
+      )
+    );
+    const results = [];
+    for (const r of settled) {
+      if (r.status === 'fulfilled') results.push(...r.value);
+    }
+    return results;
   }
 
   async getAllGuests() {
@@ -273,6 +314,27 @@ class GuestyClient {
       `/tasks-open-api/tasks?columns=${encodeURIComponent(TASK_COLUMNS)}`,
       'results'
     );
+  }
+
+  /**
+   * Fetch tasks for a specific set of listing IDs.
+   * Avoids pulling the entire account's task history for pilot migrations.
+   */
+  async getTasksByListingIds(listingIds) {
+    if (!listingIds || listingIds.length === 0) return [];
+    const settled = await Promise.allSettled(
+      listingIds.map(id =>
+        this.getAllPaginated(
+          `/tasks-open-api/tasks?columns=${encodeURIComponent(TASK_COLUMNS)}&filters[listingId]=${id}`,
+          'results'
+        )
+      )
+    );
+    const results = [];
+    for (const r of settled) {
+      if (r.status === 'fulfilled') results.push(...r.value);
+    }
+    return results;
   }
 
   async getCount(path) {
