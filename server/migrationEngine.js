@@ -574,6 +574,34 @@ async function runMigration(migrationId) {
           rawItems = await sourceClient.getListingsByIds(pilotListingIds);
           log.info(`Pilot: fetched ${rawItems.length}/${pilotListingIds.length} listings by ID`);
 
+          // ── MTL parent auto-expansion ─────────────────────────────────────────
+          // If the user selected only an MTL parent listing (type=MTL, no complexId/
+          // parentId), automatically fetch and include its sub-units. This handles
+          // cases where sub-units weren't selectable in the UI (e.g. because Guesty
+          // uses a separate complex entity ID that doesn't match the parent listing _id).
+          const seenIds = new Set(rawItems.map(r => r._id));
+          const mtlParents = rawItems.filter(r =>
+            r.type === 'MTL' && !r.complexId && !r.parentId
+          );
+          if (mtlParents.length > 0) {
+            const subUnitArrays = await Promise.all(
+              mtlParents.map(parent => sourceClient.getSubUnitsForParent(parent._id))
+            );
+            let autoAdded = 0;
+            for (const units of subUnitArrays) {
+              for (const unit of units) {
+                if (!seenIds.has(unit._id)) {
+                  rawItems.push(unit);
+                  seenIds.add(unit._id);
+                  autoAdded++;
+                }
+              }
+            }
+            if (autoAdded > 0) {
+              log.info(`Pilot: auto-added ${autoAdded} MTL sub-unit(s) for ${mtlParents.length} parent(s)`);
+            }
+          }
+
         } else if (category === 'reservations' && pilotListingIds && migratedSrcIds.length) {
           // Fetch reservations only for the listings that were actually migrated.
           rawItems = await sourceClient.getReservationsByListingIds(migratedSrcIds);

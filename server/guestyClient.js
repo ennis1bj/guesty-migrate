@@ -257,6 +257,21 @@ class GuestyClient {
   }
 
   /**
+   * Fetch all sub-units (rooms/units) that belong to an MTL parent listing.
+   * Uses Guesty's complexId filter on the listings endpoint.
+   * Returns an empty array if the parent has no sub-units or the filter fails.
+   */
+  async getSubUnitsForParent(parentId) {
+    if (!parentId) return [];
+    try {
+      return await this.getAllPaginated(`/listings?filters[complexId]=${parentId}`, 'results');
+    } catch (err) {
+      logger.warn('getSubUnitsForParent: failed to fetch sub-units', { parentId, error: err.message });
+      return [];
+    }
+  }
+
+  /**
    * Fetch a specific set of listings directly by their IDs in parallel.
    * Use this instead of getAllListings() for pilot migrations — on large accounts
    * getAllListings() pages through hundreds of records just to discard most of them.
