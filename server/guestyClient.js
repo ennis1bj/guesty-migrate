@@ -260,8 +260,19 @@ class GuestyClient {
    * Fetch all sub-units (rooms/units) that belong to an MTL parent listing.
    * Uses Guesty's complexId filter on the listings endpoint.
    * Returns an empty array if the parent has no sub-units or the filter fails.
+   *
+   * @param {string} parentId - The complexId to look up.
+   * @param {object} [opts]
+   * @param {number|null} [opts.totalListingCount] - Total listing count in the
+   *   source account (migratable + channel-managed).  When provided, the
+   *   returned API count is compared against this value to determine whether
+   *   Guesty honoured the filter.  If the filter IS honoured the returned count
+   *   will be dramatically smaller than the account total, and we can trust ALL
+   *   returned results as sub-units — even those whose complexId field is null
+   *   in the bulk-API response.  This handles the case where Guesty omits
+   *   complexId for MTL_CHILD listings in bulk responses.
    */
-  async getSubUnitsForParent(parentId) {
+  async getSubUnitsForParent(parentId, { totalListingCount = null } = {}) {
     if (!parentId) return [];
     try {
       // Fetch ONE page only — do NOT use getAllPaginated here.
@@ -276,7 +287,28 @@ class GuestyClient {
       const data = await this.request('GET', `/listings?filters[complexId]=${encodeURIComponent(parentId)}&limit=100&skip=0`);
       const results = data.results || data;
       if (!Array.isArray(results)) return [];
-      // Client-side guard: only return listings that actually belong to this parent.
+
+      // If we know the full account listing count, use it to detect whether
+      // the filter was silently ignored by Guesty.
+      const returnedCount = data.count ?? data.total ?? null;
+      if (
+        totalListingCount &&
+        returnedCount !== null &&
+        returnedCount < totalListingCount * 0.25
+      ) {
+        // Filter was honoured — the API returned only the sub-units of this
+        // complex.  Trust all results even if their complexId field is null in
+        // the bulk-API response (a known Guesty quirk for MTL_CHILD listings).
+        logger.info(`getSubUnitsForParent: filter honoured for ${parentId} ` +
+          `(count=${returnedCount} of ${totalListingCount} total), ` +
+          `returning ${results.length} sub-unit(s) including MTL_CHILD`);
+        return results;
+      }
+
+      // Filter was silently ignored (or total listing count unknown) — fall
+      // back to client-side matching so we do not include unrelated listings.
+      logger.info(`getSubUnitsForParent: filter may be ignored for ${parentId} ` +
+        `(count=${returnedCount ?? 'unknown'}), using client-side complexId filter`);
       return results.filter(l => l.complexId === parentId || l.parentId === parentId);
     } catch (err) {
       logger.warn('getSubUnitsForParent: failed to fetch sub-units', { parentId, error: err.message });

@@ -608,22 +608,9 @@ async function runMigration(migrationId) {
           }
           const seenIds = new Set(rawItems.map(r => r._id));
 
-          // Log listing details for production diagnostics.
+          // Log listing details for diagnostics.
           for (const r of rawItems) {
             log.info(`Pilot listing: id=${r._id} type=${r.type} complexId=${r.complexId || 'none'} parentId=${r.parentId || 'none'}`);
-            // Log all top-level keys so we can identify any sibling/unit reference fields
-            log.info(`Pilot listing keys: ${Object.keys(r).sort().join(', ')}`);
-            // Log any array/object fields that might reference sibling units
-            const arrayFields = Object.entries(r)
-              .filter(([, v]) => Array.isArray(v) && v.length > 0)
-              .map(([k, v]) => `${k}[${v.length}]`);
-            if (arrayFields.length > 0) log.info(`Pilot listing arrays: ${arrayFields.join(', ')}`);
-            // Log any fields whose names suggest sibling/complex relationships
-            const relFields = ['units', 'subUnits', 'rooms', 'children', 'siblings',
-              'relatedListings', 'multiUnit', 'groupId', 'listing', 'complex'];
-            for (const f of relFields) {
-              if (r[f] !== undefined) log.info(`Pilot listing field ${f}: ${JSON.stringify(r[f]).slice(0, 200)}`);
-            }
           }
 
           const missingIds = new Set();
@@ -638,13 +625,11 @@ async function runMigration(migrationId) {
             }
           }
 
-          // ── Fallback: resolve orphaned MTL siblings whose complexId the bulk API omitted ─
-          // Guesty's GET /listings bulk response does not consistently include complexId
-          // on all sub-units.  Those "orphaned" MTL entries appear in listingDetails with
-          // complexId=null even though they do belong to a complex.  When the manifest
-          // lookup above found no new siblings, check if any of those orphaned MTLs
-          // are actually siblings by fetching each one individually (full listing objects
-          // always include complexId).  This is at most a handful of extra API calls.
+          // ── Fallbacks: resolve siblings whose complexId the bulk API omitted ──────
+          // Guesty's GET /listings bulk response does not consistently include
+          // complexId for all sub-unit types (particularly MTL_CHILD).  We try
+          // two progressively more expensive approaches when the manifest lookup
+          // above found no new siblings.
           if (missingIds.size === 0) {
             // Collect complexIds we still need siblings for (group has <=1 known member)
             const wantedComplexIds = new Set(
@@ -654,23 +639,58 @@ async function runMigration(migrationId) {
             );
 
             if (wantedComplexIds.size > 0) {
-              // Orphaned MTLs: present in listingDetails but complexId was null in bulk response
-              const orphanedIds = (migration.manifest?.listingDetails || [])
-                .filter(l => l.type === 'MTL' && !l.complexId && !seenIds.has(l.id))
-                .map(l => l.id);
+              // ── Fallback 1: Guesty complexId API filter with count-based trust ──
+              // Call GET /listings?filters[complexId]={id}&limit=100.  If Guesty
+              // honours the filter, the returned count will be << the account total.
+              // In that case we trust ALL returned listings as sub-units of this
+              // complex — even those whose complexId field is null in the bulk
+              // response (a known issue for MTL_CHILD sub-units).
+              const totalListingCount =
+                ((migration.manifest?.listings || 0) +
+                  (migration.manifest?.channelManagedListings || 0)) || null;
 
-              if (orphanedIds.length > 0) {
-                log.info(`Pilot: resolving ${orphanedIds.length} orphaned MTL(s) whose complexId was missing from bulk API response`);
-                const orphanedFull = await sourceClient.getListingsByIds(orphanedIds);
-                for (const ol of orphanedFull) {
-                  const cId = ol.complexId || ol.parentId;
-                  if (cId && wantedComplexIds.has(cId) && !seenIds.has(ol._id)) {
-                    missingIds.add(ol._id);
-                    seenIds.add(ol._id);
+              for (const wantedId of wantedComplexIds) {
+                const filterResults = await sourceClient.getSubUnitsForParent(
+                  wantedId,
+                  { totalListingCount }
+                );
+                let addedByFilter = 0;
+                for (const su of filterResults) {
+                  if (!seenIds.has(su._id)) {
+                    missingIds.add(su._id);
+                    seenIds.add(su._id);
+                    addedByFilter++;
                   }
                 }
-                if (missingIds.size > 0) {
-                  log.info(`Pilot: found ${missingIds.size} sibling(s) among orphaned MTLs`);
+                if (addedByFilter > 0) {
+                  log.info(`Pilot: found ${addedByFilter} sibling(s) via API filter for complex ${wantedId}`);
+                }
+              }
+
+              // ── Fallback 2: individual-fetch orphaned MTL listings ────────────
+              // If the API filter found nothing (possibly because Guesty ignores it
+              // for this account), fall back to fetching each "orphaned" MTL listing
+              // (type=MTL, complexId=null in bulk response) individually.  Individual
+              // fetches always return complexId.  Skip MTL_CHILD here — there are
+              // often thousands of them and fetching individually is not feasible.
+              if (missingIds.size === 0) {
+                const orphanedIds = (migration.manifest?.listingDetails || [])
+                  .filter(l => l.type === 'MTL' && !l.complexId && !seenIds.has(l.id))
+                  .map(l => l.id);
+
+                if (orphanedIds.length > 0) {
+                  log.info(`Pilot: resolving ${orphanedIds.length} orphaned MTL(s) whose complexId was missing from bulk API response`);
+                  const orphanedFull = await sourceClient.getListingsByIds(orphanedIds);
+                  for (const ol of orphanedFull) {
+                    const cId = ol.complexId || ol.parentId;
+                    if (cId && wantedComplexIds.has(cId) && !seenIds.has(ol._id)) {
+                      missingIds.add(ol._id);
+                      seenIds.add(ol._id);
+                    }
+                  }
+                  if (missingIds.size > 0) {
+                    log.info(`Pilot: found ${missingIds.size} sibling(s) among orphaned MTLs`);
+                  }
                 }
               }
             }
