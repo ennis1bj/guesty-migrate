@@ -625,6 +625,34 @@ async function runMigration(migrationId) {
             }
           }
 
+          // ── Fallback: fetch parent complex entity for authoritative sub-unit list ─
+          // The bulk GET /listings API does not reliably include complexId on all
+          // sub-units, so complexGroups built at preflight time may be incomplete.
+          // When manifest lookup returns no new siblings, fetch the parent complex
+          // entity directly. Parent entities have a `units` array that is the
+          // authoritative list of all their sub-units regardless of what the bulk
+          // API returned.
+          if (missingIds.size === 0) {
+            const parentIds = new Set(
+              rawItems
+                .filter(r => r.complexId && (complexGroups[r.complexId] || []).length <= 1)
+                .map(r => r.complexId)
+            );
+            for (const parentId of parentIds) {
+              const [parentEntity] = await sourceClient.getListingsByIds([parentId]);
+              if (!parentEntity) continue;
+              const unitEntries = parentEntity.units || parentEntity.subUnits || [];
+              log.info(`Pilot: parent ${parentId} has ${unitEntries.length} unit(s) in entity (fields: ${Object.keys(parentEntity).filter(k => ['units','subUnits','type','_id'].includes(k)).join(', ')})`);
+              for (const entry of unitEntries) {
+                const unitId = typeof entry === 'object' ? (entry._id || entry.id) : entry;
+                if (unitId && !seenIds.has(unitId)) {
+                  missingIds.add(unitId);
+                  seenIds.add(unitId);
+                }
+              }
+            }
+          }
+
           if (missingIds.size > 0) {
             const siblings = await sourceClient.getListingsByIds([...missingIds]);
             rawItems.push(...siblings);
