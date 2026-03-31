@@ -83,6 +83,19 @@ router.post('/preflight', async (req, res) => {
       const migratableListings   = listingDetails.filter(l => !l.isChannelManaged);
       const channelManagedCount  = listingDetails.length - migratableListings.length;
 
+      // Build a complexId → [listingId, ...] map from the full listing catalogue.
+      // Stored in the manifest so the migration engine can instantly look up all
+      // siblings of any sub-unit (or all children of a parent) without making
+      // additional Guesty API calls during the migration run.
+      const complexGroups = {};
+      for (const l of allListings) {
+        const cId = l.complexId || l.parentId;
+        if (cId) {
+          if (!complexGroups[cId]) complexGroups[cId] = [];
+          complexGroups[cId].push(l._id);
+        }
+      }
+
       manifest = {
         custom_fields: customFields,
         fees,
@@ -96,6 +109,7 @@ router.post('/preflight', async (req, res) => {
         tasks,
         photos: photoCount,
         listingDetails,
+        complexGroups,
         pricing_snapshot_available: true,
       };
     } catch (err) {

@@ -574,20 +574,34 @@ async function runMigration(migrationId) {
           rawItems = await sourceClient.getListingsByIds(pilotListingIds);
           log.info(`Pilot: fetched ${rawItems.length}/${pilotListingIds.length} listings by ID`);
 
-          // ── Multi-unit family auto-expansion ─────────────────────────────────
-          // When a user selects one listing from a multi-unit property, we need to
-          // pull in ALL related units so nothing is left behind.  Guesty links units
-          // via complexId in two different ways depending on what the user selected:
+          // ── Multi-unit family auto-expansion via manifest complexGroups ──────
+          // The preflight stores a complexId → [listingId, ...] map in the
+          // migration manifest built from the full listing catalogue.  We use that
+          // map here for instant sibling lookup — no extra Guesty API calls needed.
           //
           //   Case A — user selected a PARENT (no complexId on the listing):
-          //     Query filters[complexId]=listing._id  →  finds all sub-units
+          //     Look up complexGroups[listing._id] → all its sub-unit IDs
           //
           //   Case B — user selected a SUB-UNIT (has complexId set):
-          //     Query filters[complexId]=listing.complexId  →  finds all siblings
-          //     (including potentially the selected unit itself; dedup handles it)
+          //     Look up complexGroups[listing.complexId] → all sibling IDs
           //
-          // For standalone (STL) listings neither query returns anything, so there
-          // is no overhead beyond one fast API call per selected listing.
+          // For standalone (STL) listings neither key will exist in the map
+          // so nothing is added and there is zero overhead.
+          // Use pre-built map from manifest (new migrations) or reconstruct
+          // from listingDetails (older migrations that predate this field).
+          let complexGroups = migration.manifest?.complexGroups;
+          if (!complexGroups || Object.keys(complexGroups).length === 0) {
+            complexGroups = {};
+            for (const l of migration.manifest?.listingDetails || []) {
+              if (l.complexId) {
+                if (!complexGroups[l.complexId]) complexGroups[l.complexId] = [];
+                complexGroups[l.complexId].push(l.id);
+              }
+            }
+            if (Object.keys(complexGroups).length > 0) {
+              log.info(`Pilot: reconstructed complexGroups from listingDetails (${Object.keys(complexGroups).length} complex(es))`);
+            }
+          }
           const seenIds = new Set(rawItems.map(r => r._id));
 
           // Log listing details for production diagnostics.
@@ -595,39 +609,24 @@ async function runMigration(migrationId) {
             log.info(`Pilot listing: id=${r._id} type=${r.type} complexId=${r.complexId || 'none'} parentId=${r.parentId || 'none'}`);
           }
 
-          // Build the set of complexId values to probe — de-duped so we don't
-          // fire the same Guesty query twice if the user selected multiple units
-          // from the same complex.
-          const complexIdsToProbe = new Set();
+          const missingIds = new Set();
           for (const r of rawItems) {
-            if (r.complexId) {
-              // Sub-unit: probe using its parent's complex ID to find all siblings.
-              complexIdsToProbe.add(r.complexId);
-            } else {
-              // Potential parent: probe using its own ID to find its sub-units.
-              complexIdsToProbe.add(r._id);
-            }
-          }
-
-          const subUnitArrays = await Promise.all(
-            [...complexIdsToProbe].map(cid => sourceClient.getSubUnitsForParent(cid))
-          );
-          let autoAdded = 0;
-          let parentsExpanded = 0;
-          for (const units of subUnitArrays) {
-            if (units.length > 0) parentsExpanded++;
-            for (const unit of units) {
-              if (!seenIds.has(unit._id)) {
-                rawItems.push(unit);
-                seenIds.add(unit._id);
-                autoAdded++;
+            const lookupKey = r.complexId || r._id; // sub-unit: use parent key; parent: use own id
+            const members = complexGroups[lookupKey] || [];
+            for (const memberId of members) {
+              if (!seenIds.has(memberId)) {
+                missingIds.add(memberId);
+                seenIds.add(memberId);
               }
             }
           }
-          if (autoAdded > 0) {
-            log.info(`Pilot: auto-added ${autoAdded} sibling/sub-unit(s) from ${parentsExpanded} complex(es)`);
+
+          if (missingIds.size > 0) {
+            const siblings = await sourceClient.getListingsByIds([...missingIds]);
+            rawItems.push(...siblings);
+            log.info(`Pilot: auto-added ${siblings.length} sibling/sub-unit(s) from manifest complexGroups`);
           } else {
-            log.info(`Pilot: family probe returned 0 additional listings (standalone or already fully selected)`);
+            log.info(`Pilot: no additional siblings in manifest (standalone listing or all units already selected)`);
           }
 
         } else if (category === 'reservations' && pilotListingIds && migratedSrcIds.length) {
