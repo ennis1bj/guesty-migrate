@@ -317,6 +317,60 @@ class GuestyClient {
   }
 
   /**
+   * Fetch all sub-units of an MTL listing using two complementary approaches:
+   *   1. GET /listings?filters[parentId]={id} — returns sub-units that declare
+   *      this listing as their parent (some Guesty plans honour parentId filter).
+   *   2. GET /listings/{id}/sub-units — dedicated endpoint on plans that expose it.
+   * Returns a deduplicated array of sub-unit objects (may be empty).
+   */
+  async getSubUnitsByListingId(listingId) {
+    if (!listingId) return [];
+    const found = new Map();
+
+    // Strategy A: parentId filter
+    try {
+      const data = await this.request(
+        'GET',
+        `/listings?filters[parentId]=${encodeURIComponent(listingId)}&limit=100&skip=0`
+      );
+      const results = data.results || data;
+      if (Array.isArray(results)) {
+        for (const r of results) {
+          if (r._id) found.set(r._id, r);
+        }
+        if (found.size > 0) {
+          logger.info(`getSubUnitsByListingId: parentId filter returned ${found.size} sub-unit(s) for ${listingId}`);
+        }
+      }
+    } catch (err) {
+      logger.info(`getSubUnitsByListingId: parentId filter unavailable for ${listingId}: ${err.message}`);
+    }
+
+    // Strategy B: dedicated sub-units endpoint
+    if (found.size === 0) {
+      for (const endpoint of [`/listings/${listingId}/sub-units`, `/listings/${listingId}/rooms`]) {
+        try {
+          const data = await this.request('GET', endpoint);
+          const results = data.results || data;
+          if (Array.isArray(results) && results.length > 0) {
+            for (const r of results) {
+              if (r._id) found.set(r._id, r);
+            }
+            logger.info(`getSubUnitsByListingId: ${endpoint} returned ${found.size} sub-unit(s) for ${listingId}`);
+            break;
+          }
+        } catch (err) {
+          if (err.response?.status !== 404 && err.response?.status !== 400) {
+            logger.info(`getSubUnitsByListingId: ${endpoint} error: ${err.response?.status || err.message}`);
+          }
+        }
+      }
+    }
+
+    return [...found.values()];
+  }
+
+  /**
    * Fetch a specific set of listings directly by their IDs in parallel.
    * Use this instead of getAllListings() for pilot migrations — on large accounts
    * getAllListings() pages through hundreds of records just to discard most of them.

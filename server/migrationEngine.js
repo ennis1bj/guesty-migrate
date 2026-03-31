@@ -597,9 +597,10 @@ async function runMigration(migrationId) {
           if (!complexGroups || Object.keys(complexGroups).length === 0) {
             complexGroups = {};
             for (const l of migration.manifest?.listingDetails || []) {
-              if (l.complexId) {
-                if (!complexGroups[l.complexId]) complexGroups[l.complexId] = [];
-                complexGroups[l.complexId].push(l.id);
+              const cId = l.complexId || l.parentId;
+              if (cId) {
+                if (!complexGroups[cId]) complexGroups[cId] = [];
+                complexGroups[cId].push(l.id);
               }
             }
             if (Object.keys(complexGroups).length > 0) {
@@ -610,7 +611,8 @@ async function runMigration(migrationId) {
 
           // Log listing details for diagnostics.
           for (const r of rawItems) {
-            log.info(`Pilot listing: id=${r._id} type=${r.type} complexId=${r.complexId || 'none'} parentId=${r.parentId || 'none'}`);
+            const subCount = Array.isArray(r.subListingsIds) ? r.subListingsIds.length : 0;
+            log.info(`Pilot listing: id=${r._id} type=${r.type} complexId=${r.complexId || 'none'} parentId=${r.parentId || 'none'} subListingsIds=${subCount}`);
           }
 
           const missingIds = new Set();
@@ -621,6 +623,37 @@ async function runMigration(migrationId) {
               if (!seenIds.has(memberId)) {
                 missingIds.add(memberId);
                 seenIds.add(memberId);
+              }
+            }
+
+            // Also look up children stored under this listing's own ID.
+            // MTL parents whose children were captured via subListingsIds during
+            // preflight will be keyed by the parent's _id in complexGroups.
+            if (r._id !== lookupKey) {
+              const ownChildren = complexGroups[r._id] || [];
+              for (const childId of ownChildren) {
+                if (!seenIds.has(childId)) {
+                  missingIds.add(childId);
+                  seenIds.add(childId);
+                }
+              }
+            }
+
+            // Direct field: MTL listings fetched individually often include a
+            // subListingsIds array listing the IDs of all their sub-units.
+            // Guesty omits these IDs from the bulk /listings response but
+            // returns them on the per-listing GET.
+            if (Array.isArray(r.subListingsIds) && r.subListingsIds.length > 0) {
+              let addedFromField = 0;
+              for (const subId of r.subListingsIds) {
+                if (!seenIds.has(subId)) {
+                  missingIds.add(subId);
+                  seenIds.add(subId);
+                  addedFromField++;
+                }
+              }
+              if (addedFromField > 0) {
+                log.info(`Pilot: found ${addedFromField} sub-unit(s) via listing.subListingsIds for ${r._id}`);
               }
             }
           }
@@ -692,6 +725,37 @@ async function runMigration(migrationId) {
                     log.info(`Pilot: found ${missingIds.size} sibling(s) among orphaned MTLs`);
                   }
                 }
+              }
+            }
+          }
+
+          // ── Fallback 3: parentId filter + dedicated sub-units endpoint ────
+          // Guesty's bulk /listings API returns MTL_CHILD with complexId=null
+          // AND parentId=null, so manifest lookup and complexId filter both
+          // come up empty.  As a last resort, for each MTL listing in rawItems:
+          //   a) Try GET /listings?filters[parentId]={id} — if Guesty honours
+          //      this filter the response contains the direct sub-units.
+          //   b) Try GET /listings/{id}/sub-units — some Guesty plans expose
+          //      a dedicated endpoint returning the sub-unit objects directly.
+          // Both approaches query by the MTL listing's own ID, not complexId.
+          if (missingIds.size === 0) {
+            const mtlListings = rawItems.filter(
+              r => r.type === 'MTL' || r.listingType === 'MTL' ||
+                   (Array.isArray(r.subListingsIds) && r.subListingsIds.length > 0)
+            );
+            for (const mtl of mtlListings) {
+              const subUnits = await sourceClient.getSubUnitsByListingId(mtl._id);
+              let added = 0;
+              for (const su of subUnits) {
+                const subId = su._id || su.id;
+                if (subId && !seenIds.has(subId)) {
+                  missingIds.add(subId);
+                  seenIds.add(subId);
+                  added++;
+                }
+              }
+              if (added > 0) {
+                log.info(`Pilot: found ${added} sub-unit(s) via sub-units endpoint for ${mtl._id}`);
               }
             }
           }

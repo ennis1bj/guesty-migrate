@@ -71,7 +71,8 @@ router.post('/preflight', async (req, res) => {
         title:            l.title || l.nickname || `Listing ${l._id}`,
         nickname:         l.nickname || null,
         type:             l.type || 'STL',
-        complexId:        l.complexId || l.parentId || null,
+        complexId:        l.complexId || null,
+        parentId:         l.parentId || null,
         city:             l.address?.city || null,
         state:            l.address?.state || null,
         country:          l.address?.country || null,
@@ -87,12 +88,29 @@ router.post('/preflight', async (req, res) => {
       // Stored in the manifest so the migration engine can instantly look up all
       // siblings of any sub-unit (or all children of a parent) without making
       // additional Guesty API calls during the migration run.
+      //
+      // Three linkage fields are used (Guesty returns different ones for
+      // different listing types):
+      //   complexId  — set on MTL listings pointing to the complex entity
+      //   parentId   — set on MTL_CHILD listings pointing to their MTL parent
+      //   subListingsIds — array on MTL listings listing their direct children
       const complexGroups = {};
       for (const l of allListings) {
+        // Group sub-units under their complex entity (complexId) or MTL parent
         const cId = l.complexId || l.parentId;
         if (cId) {
           if (!complexGroups[cId]) complexGroups[cId] = [];
           complexGroups[cId].push(l._id);
+        }
+        // Also index an MTL listing's direct children under its own _id so the
+        // pilot phase can find them when looking up by listing ID, not complex ID.
+        if (Array.isArray(l.subListingsIds) && l.subListingsIds.length > 0) {
+          if (!complexGroups[l._id]) complexGroups[l._id] = [];
+          for (const subId of l.subListingsIds) {
+            if (!complexGroups[l._id].includes(subId)) {
+              complexGroups[l._id].push(subId);
+            }
+          }
         }
       }
 

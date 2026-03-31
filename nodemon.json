@@ -1,0 +1,5 @@
+{
+  "watch": ["server"],
+  "ext": "js,mjs,cjs,json",
+  "ignore": [".local/**", "client/**", "node_modules/**", "*.log"]
+}

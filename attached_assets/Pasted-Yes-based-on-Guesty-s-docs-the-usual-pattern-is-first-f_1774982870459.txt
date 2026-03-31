@@ -1,0 +1,157 @@
+Yes — based on Guesty’s docs, the usual pattern is: first fetch the **complex** to get its `propertyIds`, then fetch the corresponding **listings** with a second call using those IDs and a `fields` list for the child-unit details you want. Guesty’s complex endpoints expose complex metadata including `propertyIds`, and the listings endpoint supports filtering by IDs plus selective fields.[1][2][3]
+
+## API pattern
+
+1. Get the complex by ID to retrieve the complex record and its assigned `propertyIds`.[2][3]
+2. Use `GET /v1/listings` with the child listing IDs to retrieve each unit’s details. The listings endpoint supports ID-based retrieval and a `fields` parameter for returning only the properties you need.[4][1]
+
+## Example calls
+
+### 1) Get the complex and its child property IDs
+
+```bash
+curl --request GET \
+  --url 'https://open-api.guesty.com/v1/properties-api/complexes/{COMPLEX_ID}' \
+  --header 'Accept: application/json' \
+  --header 'Authorization: Bearer {ACCESS_TOKEN}'
+```
+
+This gets the complex itself; according to the complexes docs, complexes include fields such as IDs, title, nickname, and `propertyIds`, which is what you need for the next step.[3][2]
+
+### 2) Get all child units for that complex
+
+```bash
+curl --globoff \
+  --request GET \
+  --url 'https://open-api.guesty.com/v1/listings?ids=ID_1,ID_2,ID_3&fields=_id title nickname type address accommodates bedrooms bathrooms amenities pictures prices terms active isListed' \
+  --header 'Accept: application/json' \
+  --header 'Authorization: Bearer {ACCESS_TOKEN}'
+```
+
+Guesty documents `GET /v1/listings` as the endpoint for retrieving listings, and their examples show using `ids=` plus `fields=` to control which listing details come back.[1][4]
+
+## Full retrieval flow
+
+If your complex response looks conceptually like this:
+
+```json
+{
+  "_id": "complex_123",
+  "title": "Aspen Lofts",
+  "nickname": "Aspen Complex",
+  "propertyIds": [
+    "65f111111111111111111111",
+    "65f222222222222222222222",
+    "65f333333333333333333333"
+  ]
+}
+```
+
+Then the second request becomes:
+
+```bash
+curl --globoff \
+  --request GET \
+  --url 'https://open-api.guesty.com/v1/listings?ids=65f111111111111111111111,65f222222222222222222222,65f333333333333333333333&fields=_id title nickname type address.full address.city address.country accommodates bedrooms bathrooms amenities pictures prices terms active isListed' \
+  --header 'Accept: application/json' \
+  --header 'Authorization: Bearer {ACCESS_TOKEN}'
+```
+
+That gives you the complex’s child units with practical details such as title, nickname, type, address, occupancy, bedrooms, bathrooms, amenities, pictures, prices, terms, and listing status, assuming those fields are available in your account’s listing schema.[1]
+
+## Single-call alternative
+
+If you already know the child listing IDs, you can skip the complex lookup and call listings directly with `ids=...`. Guesty’s available-listings guide shows `ids` being accepted on the listings endpoint.[4]
+
+## Notes
+
+- Use the complex endpoint when you need the authoritative membership of a complex, because that is where Guesty documents `propertyIds`.[2][3]
+- Use `fields=` aggressively so the listings response stays smaller and faster. Guesty explicitly recommends this as a best practice for `GET /listings`.[1]
+- If the complex contains multi-units and you also need sub-units beneath those multi-units, Guesty documents a separate search pattern using `type=MTL_CHILD` with `mtl.p` equal to the parent multi-unit listing ID.[1]
+
+## Example in JavaScript
+
+```javascript
+const token = process.env.GUESTY_TOKEN;
+const complexId = 'COMPLEX_ID';
+
+async function getComplexWithChildren() {
+  const complexRes = await fetch(
+    `https://open-api.guesty.com/v1/properties-api/complexes/${complexId}`,
+    {
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+
+  const complex = await complexRes.json();
+
+  const ids = (complex.propertyIds || []).join(',');
+  if (!ids) return { complex, children: [] };
+
+  const fields = [
+    '_id',
+    'title',
+    'nickname',
+    'type',
+    'address.full',
+    'address.city',
+    'address.country',
+    'accommodates',
+    'bedrooms',
+    'bathrooms',
+    'amenities',
+    'pictures',
+    'prices',
+    'terms',
+    'active',
+    'isListed'
+  ].join(' ');
+
+  const listingsRes = await fetch(
+    `https://open-api.guesty.com/v1/listings?ids=${encodeURIComponent(ids)}&fields=${encodeURIComponent(fields)}`,
+    {
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+
+  const listings = await listingsRes.json();
+
+  return {
+    complex,
+    children: listings.results || listings
+  };
+}
+```
+
+This matches Guesty’s documented split between complex retrieval and listing retrieval.[2][1]
+
+Would you like me to turn this into a ready-to-run Node.js function or a Postman collection snippet?
+
+Sources
+[1] Create a Property - Guesty Open API https://open-api-docs.guesty.com/docs/create-a-property
+[2] Get complex - Guesty Open API https://open-api-docs.guesty.com/reference/complexescontroller_getcomplexbyid
+[3] Get a list of all complexes - Guesty Open API https://open-api-docs.guesty.com/reference/getallcomplexes
+[4] Query Available Listings - Guesty Open API https://open-api-docs.guesty.com/docs/available-listings
+[5] Retrieve all listings - Guesty Open API https://open-api-docs.guesty.com/reference/get_listings
+[6] Searching for Available Listings and All Listings - Guesty Open API https://open-api-docs.guesty.com/docs/searching-for-available-listings-and-all-listings
+[7] Create a reservation from quote - Guesty Open API https://open-api-docs.guesty.com/reference/reservationsopenapicontroller_createreservation
+[8] Fetch Reservation Payment Schedules - Guesty Open API https://open-api-docs.guesty.com/docs/fetch-reservation-payment-schedules
+[9] Changelog - Guesty Open API https://open-api-docs.guesty.com/changelog?page=3
+[10] Retrieve the calendar for a single listing - Guesty Open API https://open-api-docs.guesty.com/reference/get_availability-pricing-api-calendar-listings-id
+[11] Create a Rate Plan - Guesty Open API https://open-api-docs.guesty.com/reference/rateplancontroller_create
+[12] Retrieve all photos for a given listing. - Guesty Open API https://open-api-docs.guesty.com/reference/get
+[13] Add a payment to reservation - Guesty Open API https://open-api-docs.guesty.com/reference/post_reservations-id-payments
+[14] Retrieve a reservation - Guesty Open API https://open-api-docs.guesty.com/reference/get_reservations-id
+[15] Assign propertyIds to a complex - API Reference - Guesty Open API https://open-api-docs.guesty.com/reference/complexescontroller_assigncomplexpropertyids
+[16] Property Descriptions - Guesty Open API https://open-api-docs.guesty.com/docs/listing-descriptions
+[17] Retrieve the optimized calendar for a single listing - Guesty Open API https://open-api-docs.guesty.com/reference/get_availability-pricing-api-calendar-listings-minified-listingid
+[18] Property Location & Details - Guesty Open API https://open-api-docs.guesty.com/docs/listing-location
+[19] List and Unlist Properties - Guesty Open API https://open-api-docs.guesty.com/docs/list-and-unlist-properties
+[20] Post msg(Send new msg) - Guesty Open API https://open-api-docs.guesty.com/reference/post_communication-conversations-conversationid-send-message
+[21] List all cities - Guesty Open API https://open-api-docs.guesty.com/reference/get_listings-cities
