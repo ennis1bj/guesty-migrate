@@ -36,11 +36,14 @@ function selectableListingIds(details: ListingDetail[]): string[] {
   // All listings are selectable — channel-managed ones are cloned as direct
   // listings (integrations stripped by the engine). Only exclude MTL parents
   // that have zero sub-units anywhere in the source (truly orphaned).
+  // Note: sub-units also have type='MTL' but have complexId set (mapped from
+  // parentId in preflight). They must be included so the parent's room count
+  // is correct and they can be individually selected.
   const hasSubUnit = new Set(
     details.filter((l) => l.complexId).map((l) => l.complexId as string)
   );
   return details
-    .filter((l) => l.type !== 'MTL' || hasSubUnit.has(l.id))
+    .filter((l) => l.type !== 'MTL' || l.complexId || hasSubUnit.has(l.id))
     .map((l) => l.id);
 }
 
@@ -671,7 +674,12 @@ export default function Migrate() {
         const groups: Group[] = [];
         const standalone: ListingDetail[] = [];
         for (const l of sorted) {
-          if (l.type === 'MTL' && !seenIds.has(l.id)) {
+          // Only true parent MTL listings have no complexId.
+          // Sub-units also have type='MTL' but have complexId set (mapped from parentId).
+          // Without this guard, sub-units sorted before their parent would be
+          // mistakenly treated as parents with 0 rooms, consuming seenIds before
+          // the real parent gets a chance to collect its rooms.
+          if (l.type === 'MTL' && !l.complexId && !seenIds.has(l.id)) {
             const rooms = sorted.filter(r => r.complexId === l.id && !seenIds.has(r.id));
             groups.push({ parent: l, rooms });
             seenIds.add(l.id);
