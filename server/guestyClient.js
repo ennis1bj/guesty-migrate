@@ -144,6 +144,7 @@ class GuestyClient {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
+        timeout: 60000, // 60 s — prevents hanging indefinitely on slow Guesty responses
       };
       if (data) config.data = data;
       const response = await axios(config);
