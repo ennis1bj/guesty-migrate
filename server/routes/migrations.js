@@ -71,7 +71,7 @@ router.post('/preflight', async (req, res) => {
         title:            l.title || l.nickname || `Listing ${l._id}`,
         nickname:         l.nickname || null,
         type:             l.type || 'STL',
-        complexId:        l.complexId || null,
+        complexId:        l.complexId || l.parentId || null,
         city:             l.address?.city || null,
         state:            l.address?.state || null,
         country:          l.address?.country || null,
