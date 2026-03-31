@@ -242,20 +242,27 @@ async function recoverStuckMigrations() {
   try {
     const { pool } = require('./db');
 
-    // ── 1. Mark long-running migrations as failed ──────────────────────────
-    // Migrations stuck in 'running' for over an hour are orphaned — the engine
-    // crashed mid-run.  Mark them failed so the user can retry.
-    // Use started_at (stamped when the engine claims the migration) rather than
-    // created_at (original creation date, months old for reprocessed migrations)
-    // so that server restarts don't immediately kill actively-running jobs.
+    // ── 1. Mark stalled migrations as failed ──────────────────────────────
+    // A running migration is considered stalled when last_progress_at has not
+    // been updated in 15 minutes.  The engine stamps last_progress_at before
+    // every blocking Guesty API call; if no stamp arrives for 15 minutes the
+    // process is almost certainly hung waiting on a response that will never
+    // come (e.g. the Guesty API server stopped responding mid-request).
+    //
+    // Fall back to started_at (set when the engine claims the migration) when
+    // last_progress_at has not been written yet (e.g. the engine crashed before
+    // reaching its first touchProgress call).  created_at is a last resort for
+    // very old rows that predate the started_at column.
     const runningResult = await pool.query(
       `SELECT id FROM migrations WHERE status = 'running'
-       AND COALESCE(started_at, created_at) < NOW() - INTERVAL '4 hours'`
+       AND COALESCE(last_progress_at, started_at, created_at) < NOW() - INTERVAL '15 minutes'`
     );
     for (const row of runningResult.rows) {
-      logger.info(`Recovering stuck running migration ${row.id}`);
+      logger.warn(`Migration ${row.id} stalled — no progress for 15 min, marking failed`);
       await pool.query(
-        "UPDATE migrations SET status = 'failed', error_message = 'Server restarted during migration' WHERE id = $1",
+        `UPDATE migrations SET status = 'failed',
+          error_message = 'Migration stalled: no progress detected for 15 minutes. The Guesty API may have stopped responding. Please reprocess.'
+         WHERE id = $1`,
         [row.id]
       );
     }

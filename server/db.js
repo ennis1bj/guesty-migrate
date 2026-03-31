@@ -190,6 +190,16 @@ const migrate = async () => {
       ALTER TABLE migrations ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
     `);
 
+    // ── Progress heartbeat ────────────────────────────────────────────────
+    // last_progress_at is stamped by the migration engine whenever meaningful
+    // work is completed (each API call, each listing created, each phase done).
+    // The stuck-migration detector compares this against NOW() — if no progress
+    // has been recorded in 15 minutes the migration is considered stalled and
+    // is automatically failed so the user can reprocess.
+    await client.query(`
+      ALTER TABLE migrations ADD COLUMN IF NOT EXISTS last_progress_at TIMESTAMPTZ;
+    `);
+
     console.log('Database migrations completed successfully');
 
     // ── Auto-seed admin from environment variables ──────────────────────────

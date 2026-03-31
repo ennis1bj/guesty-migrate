@@ -411,6 +411,23 @@ const ALLOWED_EXTRA_COLUMNS = new Set([
   'selected_listing_ids',
 ]);
 
+/**
+ * Stamp last_progress_at = NOW() on the migration row.
+ * Call this immediately before any potentially-blocking Guesty API call so
+ * the stuck-migration detector can tell the difference between "working slowly"
+ * and "hung waiting on a response that will never arrive".
+ */
+async function touchProgress(migrationId) {
+  try {
+    await pool.query(
+      `UPDATE migrations SET last_progress_at = NOW() WHERE id = $1`,
+      [migrationId]
+    );
+  } catch {
+    // Non-fatal — heartbeat failure must not interrupt the migration itself
+  }
+}
+
 async function updateStatus(migrationId, status, extra = {}) {
   const sets = ['status = $2'];
   const values = [migrationId, status];
@@ -426,6 +443,9 @@ async function updateStatus(migrationId, status, extra = {}) {
     idx++;
   }
 
+  if (status === 'running') {
+    sets.push(`last_progress_at = NOW()`);
+  }
   if (status === 'complete' || status === 'failed') {
     sets.push(`completed_at = NOW()`);
   }
@@ -559,6 +579,7 @@ async function runMigration(migrationId) {
 
     try {
       log.info(`Migrating ${category}...`);
+      await touchProgress(migrationId); // stamp start-of-category so stuck detector resets
       let rawItems;
       // Set by the auto-expansion block to include original + sibling IDs.
       // The safety filter below uses this instead of selected_listing_ids so
@@ -575,6 +596,7 @@ async function runMigration(migrationId) {
         if (category === 'listings' && pilotListingIds?.length) {
           // Fetch each selected listing directly by ID in parallel.
           // Replaces getAllListings() which pages through every listing on the account.
+          await touchProgress(migrationId);
           rawItems = await sourceClient.getListingsByIds(pilotListingIds);
           log.info(`Pilot: fetched ${rawItems.length}/${pilotListingIds.length} listings by ID`);
 
@@ -744,6 +766,7 @@ async function runMigration(migrationId) {
 
                 if (orphanedIds.length > 0) {
                   log.info(`Pilot: resolving ${orphanedIds.length} orphaned MTL(s) whose complexId was missing from bulk API response`);
+                  await touchProgress(migrationId);
                   const orphanedFull = await sourceClient.getListingsByIds(orphanedIds);
                   for (const ol of orphanedFull) {
                     const cId = ol.complexId || ol.parentId;
@@ -775,6 +798,7 @@ async function runMigration(migrationId) {
                    (Array.isArray(r.subListingsIds) && r.subListingsIds.length > 0)
             );
             for (const mtl of mtlListings) {
+              await touchProgress(migrationId);
               const subUnits = await sourceClient.getSubUnitsByListingId(mtl._id);
               let added = 0;
               for (const su of subUnits) {
@@ -793,6 +817,7 @@ async function runMigration(migrationId) {
           }
 
           if (missingIds.size > 0) {
+            await touchProgress(migrationId);
             const siblings = await sourceClient.getListingsByIds([...missingIds]);
 
             // ── Stamp parentId on sub-units that Guesty omits it from ─────────
@@ -837,6 +862,7 @@ async function runMigration(migrationId) {
         } else {
           // Full-account fetch for non-pilot migrations and account-level categories
           // (fees, owners, guests, saved_replies, rate_strategies, custom_fields).
+          await touchProgress(migrationId);
           rawItems = categoryDef.getAll
             ? await categoryDef.getAll(sourceClient)
             : [];
