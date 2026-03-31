@@ -574,32 +574,41 @@ async function runMigration(migrationId) {
           rawItems = await sourceClient.getListingsByIds(pilotListingIds);
           log.info(`Pilot: fetched ${rawItems.length}/${pilotListingIds.length} listings by ID`);
 
-          // ── MTL parent auto-expansion ─────────────────────────────────────────
-          // If the user selected only an MTL parent listing (type=MTL, no complexId/
-          // parentId), automatically fetch and include its sub-units. This handles
-          // cases where sub-units weren't selectable in the UI (e.g. because Guesty
-          // uses a separate complex entity ID that doesn't match the parent listing _id).
+          // ── Sub-unit auto-expansion ──────────────────────────────────────────
+          // For every selected listing, probe Guesty's complexId filter to find
+          // any sub-units that belong to it as a parent.  We do this regardless
+          // of listing type because Guesty accounts vary widely in how they label
+          // the parent (type may be 'MTL', 'MULTI_UNIT', or even 'STL' on some
+          // plans) — type-checking is unreliable.  For standalone listings the
+          // filter simply returns nothing; for parents it returns all sub-units.
+          // This is the only robust way to guarantee sub-units are always included
+          // when the parent was selected.
           const seenIds = new Set(rawItems.map(r => r._id));
-          const mtlParents = rawItems.filter(r =>
-            r.type === 'MTL' && !r.complexId && !r.parentId
+
+          // Log listing types so we can diagnose future mismatches in prod logs.
+          for (const r of rawItems) {
+            log.info(`Pilot listing: id=${r._id} type=${r.type} complexId=${r.complexId || 'none'} parentId=${r.parentId || 'none'}`);
+          }
+
+          const subUnitArrays = await Promise.all(
+            rawItems.map(r => sourceClient.getSubUnitsForParent(r._id))
           );
-          if (mtlParents.length > 0) {
-            const subUnitArrays = await Promise.all(
-              mtlParents.map(parent => sourceClient.getSubUnitsForParent(parent._id))
-            );
-            let autoAdded = 0;
-            for (const units of subUnitArrays) {
-              for (const unit of units) {
-                if (!seenIds.has(unit._id)) {
-                  rawItems.push(unit);
-                  seenIds.add(unit._id);
-                  autoAdded++;
-                }
+          let autoAdded = 0;
+          let parentsExpanded = 0;
+          for (const units of subUnitArrays) {
+            if (units.length > 0) parentsExpanded++;
+            for (const unit of units) {
+              if (!seenIds.has(unit._id)) {
+                rawItems.push(unit);
+                seenIds.add(unit._id);
+                autoAdded++;
               }
             }
-            if (autoAdded > 0) {
-              log.info(`Pilot: auto-added ${autoAdded} MTL sub-unit(s) for ${mtlParents.length} parent(s)`);
-            }
+          }
+          if (autoAdded > 0) {
+            log.info(`Pilot: auto-added ${autoAdded} sub-unit(s) from ${parentsExpanded} parent listing(s)`);
+          } else {
+            log.info(`Pilot: sub-unit probe returned 0 additional listings (all selected are standalone)`);
           }
 
         } else if (category === 'reservations' && pilotListingIds && migratedSrcIds.length) {
