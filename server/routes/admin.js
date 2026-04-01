@@ -337,6 +337,68 @@ router.post('/migrations/:id/retry', async (req, res) => {
   }
 });
 
+// ── GET /api/admin/migrations/:id/diagnose-listings ──────────────────────────
+// Read-only diagnostic: fetch destination parent + 5 sample sub-units and
+// return their key MTL fields (type, listingType, parentId, complexId, title).
+router.get('/migrations/:id/diagnose-listings', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const migResult = await pool.query(
+      `SELECT dest_client_id, dest_client_secret, results FROM migrations WHERE id = $1`,
+      [id]
+    );
+    if (migResult.rowCount === 0) return res.status(404).json({ error: 'Not found' });
+    const row = migResult.rows[0];
+    const idMap = row.results?.listings?.idMap || {};
+    const SOURCE_PARENT_ID = '63779e9e778ddc00302697ba';
+    const destParentId = idMap[SOURCE_PARENT_ID];
+
+    const destClient = new GuestyClient({
+      clientId: decrypt(row.dest_client_id),
+      clientSecret: decrypt(row.dest_client_secret),
+    });
+
+    // Fetch parent
+    const parent = destParentId ? await destClient.getListingById(destParentId) : null;
+
+    // Sample 5 sub-unit dest IDs
+    const subEntries = Object.entries(idMap)
+      .filter(([srcId]) => srcId !== SOURCE_PARENT_ID)
+      .slice(0, 5);
+    const subSamples = await Promise.allSettled(
+      subEntries.map(async ([srcId, destId]) => {
+        const l = await destClient.getListingById(destId);
+        return {
+          srcId, destId,
+          type: l?.type,
+          listingType: l?.listingType,
+          parentId: l?.parentId,
+          complexId: l?.complexId,
+          title: l?.title,
+        };
+      })
+    );
+
+    res.json({
+      destParentId,
+      parent: parent ? {
+        type: parent.type,
+        listingType: parent.listingType,
+        parentId: parent.parentId,
+        complexId: parent.complexId,
+        subListingsIdsCount: Array.isArray(parent.subListingsIds) ? parent.subListingsIds.length : null,
+        title: parent.title,
+      } : null,
+      subUnitSamples: subSamples.map(r =>
+        r.status === 'fulfilled' ? r.value : { error: r.reason?.message }
+      ),
+    });
+  } catch (err) {
+    logger.error('diagnose-listings error', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /api/admin/migrations/:id/fix-listing-subresources ──────────────────
 // Backfills spaces + availability-settings for listings already created in the
 // destination account.  Runs async in the background; returns immediately.
