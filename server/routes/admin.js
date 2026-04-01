@@ -412,6 +412,104 @@ router.get('/migrations/:id/diagnose-listings', async (req, res) => {
   }
 });
 
+// ── POST /api/admin/migrations/:id/fix-mtl-relationships ─────────────────────
+// Backfills mtl.c on parent listings (children list) and mtl.p on sub-unit
+// listings (parent back-ref) with correctly remapped DESTINATION IDs.
+// Fixes "units not assigned" in Guesty's Details & Layout dashboard view.
+// Runs async; returns 202 immediately.
+router.post('/migrations/:id/fix-mtl-relationships', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const migResult = await pool.query(
+      `SELECT dest_client_id, dest_client_secret, results FROM migrations WHERE id = $1`,
+      [id]
+    );
+    if (migResult.rowCount === 0) return res.status(404).json({ error: 'Not found' });
+
+    const row = migResult.rows[0];
+    const idMap = row.results?.listings?.idMap || {};
+    if (Object.keys(idMap).length === 0) {
+      return res.status(400).json({ error: 'No listing idMap found in migration results' });
+    }
+
+    res.status(202).json({ message: 'mtl relationship backfill started', totalListings: Object.keys(idMap).length });
+
+    // ── async work ────────────────────────────────────────────────────────────
+    const log = logger.child({ migrationId: id, op: 'fix-mtl-relationships' });
+    const destClient = new GuestyClient({
+      clientId: decrypt(row.dest_client_id),
+      clientSecret: decrypt(row.dest_client_secret),
+    });
+
+    // Step 1: classify each destination listing as parent or sub-unit by type
+    const destIds = Object.values(idMap);
+    log.info(`Fetching ${destIds.length} destination listings to classify`);
+
+    const listings = (await Promise.allSettled(
+      destIds.map(async destId => {
+        const l = await destClient.getListingById(destId);
+        return l ? { destId, type: l.type, mtl: l.mtl } : null;
+      })
+    )).flatMap(r => (r.status === 'fulfilled' && r.value ? [r.value] : []));
+
+    const parents = listings.filter(l => l.type === 'MTL' || (l.mtl && Array.isArray(l.mtl.c)));
+    const subUnits = listings.filter(l => l.type === 'MTL_CHILD' || (l.mtl && l.mtl.p !== undefined));
+
+    log.info(`Classified: ${parents.length} parent(s), ${subUnits.length} sub-unit(s)`);
+
+    const results = { parents: [], subUnits: [] };
+
+    // Step 2: for each parent, set mtl.c = all destination sub-unit IDs
+    for (const parent of parents) {
+      const subUnitDestIds = subUnits.map(s => s.destId);
+      if (!parent.mtl) {
+        log.warn(`Parent ${parent.destId} has no mtl object — skipping`);
+        results.parents.push({ destId: parent.destId, status: 'skipped_no_mtl' });
+        continue;
+      }
+      try {
+        const updatedMtl = { ...parent.mtl, c: subUnitDestIds };
+        await destClient.updateListing(parent.destId, { mtl: updatedMtl });
+        log.info(`mtl.c patched on parent`, { destId: parent.destId, childCount: subUnitDestIds.length });
+        results.parents.push({ destId: parent.destId, status: 'ok', childCount: subUnitDestIds.length });
+      } catch (err) {
+        log.warn(`mtl.c PATCH failed for parent ${parent.destId}`, { error: err.message, status: err.response?.status });
+        results.parents.push({ destId: parent.destId, status: 'error', error: err.message });
+      }
+    }
+
+    // Step 3: for each sub-unit, set mtl.p = the destination parent ID
+    // (Use the first parent found; all sub-units belong to it in a single-parent MTL)
+    const destParentId = parents[0]?.destId;
+    if (!destParentId) {
+      log.warn('No parent listing found — skipping sub-unit mtl.p patching');
+    } else {
+      let ok = 0; let failed = 0;
+      for (const sub of subUnits) {
+        if (!sub.mtl) {
+          log.warn(`Sub-unit ${sub.destId} has no mtl — skipping`);
+          failed++;
+          continue;
+        }
+        try {
+          const updatedMtl = { ...sub.mtl, p: destParentId };
+          await destClient.updateListing(sub.destId, { mtl: updatedMtl });
+          ok++;
+        } catch (err) {
+          log.warn(`mtl.p PATCH failed for sub-unit ${sub.destId}`, { error: err.message, status: err.response?.status });
+          failed++;
+        }
+      }
+      log.info(`Sub-unit mtl.p patch complete`, { ok, failed, destParentId });
+      results.subUnits = { ok, failed, destParentId };
+    }
+
+    log.info('fix-mtl-relationships complete', results);
+  } catch (err) {
+    logger.error('fix-mtl-relationships error', { error: err.message });
+  }
+});
+
 // ── POST /api/admin/migrations/:id/fix-listing-subresources ──────────────────
 // Backfills spaces + availability-settings for listings already created in the
 // destination account.  Runs async in the background; returns immediately.

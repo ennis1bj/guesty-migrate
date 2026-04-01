@@ -54,6 +54,11 @@ const SOURCE_ONLY_FIELDS = new Set([
   // non-existent listings.  After all sub-units are created we do a PATCH with
   // correctly remapped destination IDs (see post-processing step below).
   'subListingsIds',
+  // mtl is Guesty's internal parent-child relationship object.
+  // mtl.c (children array) on a parent and mtl.p (parent ref) on a sub-unit both contain
+  // source account IDs.  Stripping it here lets Guesty initialise it fresh; the
+  // post-processing step below re-wires the correct destination IDs after creation.
+  'mtl',
   // NOTE: parentId is intentionally NOT in this set — it needs remapping for complex listings
 ]);
 
@@ -1192,25 +1197,55 @@ async function runMigration(migrationId) {
       // with the correctly remapped destination sub-unit IDs.
       // This is what makes Guesty's "Details and Layout" show units as assigned.
       if (category === 'listings') {
-        const parents = (Array.isArray(rawItems) ? rawItems : [])
-          .filter(l => Array.isArray(l.subListingsIds) && l.subListingsIds.length > 0);
-        if (parents.length > 0) {
-          log.info(`listings: remapping subListingsIds for ${parents.length} MTL parent(s)`);
+        // Re-wire mtl.c on parents (children list) and mtl.p on sub-units (parent ref).
+        // The mtl field is stripped during creation (SOURCE_ONLY_FIELDS) so Guesty
+        // initialises it blank; we must patch it with remapped destination IDs.
+        const rawArr = Array.isArray(rawItems) ? rawItems : [];
+        const mtlParentsSrc = rawArr.filter(l => l.mtl && Array.isArray(l.mtl.c) && l.mtl.c.length > 0);
+        const mtlChildrenSrc = rawArr.filter(l => l.mtl && l.mtl.p && idMap[l.mtl.p]);
+
+        if (mtlParentsSrc.length > 0 || mtlChildrenSrc.length > 0) {
+          log.info(`listings: remapping mtl for ${mtlParentsSrc.length} parent(s) and ${mtlChildrenSrc.length} child(ren)`);
+
+          // Patch parents: update mtl.c with destination sub-unit IDs
           await Promise.allSettled(
-            parents.map(async (srcParent) => {
+            mtlParentsSrc.map(async (srcParent) => {
               const srcParentId = srcParent._id || srcParent.id;
               const destParentId = idMap[srcParentId];
-              if (!destParentId) return; // parent wasn't migrated
-              const destSubIds = srcParent.subListingsIds
-                .map(srcSubId => idMap[srcSubId])
-                .filter(Boolean);
-              if (destSubIds.length === 0) return; // no sub-units migrated
+              if (!destParentId) return;
+              const destSubIds = srcParent.mtl.c.map(sid => idMap[sid]).filter(Boolean);
+              if (destSubIds.length === 0) return;
               try {
-                await destClient.updateListing(destParentId, { subListingsIds: destSubIds });
-                log.info(`listings: subListingsIds remapped`, { destParentId, count: destSubIds.length });
+                const destParent = await destClient.getListingById(destParentId);
+                if (!destParent?.mtl) return;
+                await destClient.updateListing(destParentId, { mtl: { ...destParent.mtl, c: destSubIds } });
+                log.info(`listings: mtl.c remapped`, { destParentId, count: destSubIds.length });
               } catch (err) {
-                log.warn(`listings: subListingsIds PATCH failed`, {
+                log.warn(`listings: mtl.c PATCH failed`, {
                   destParentId,
+                  status: err.response?.status,
+                  error: err.response?.data?.message || err.message,
+                });
+              }
+            })
+          );
+
+          // Patch sub-units: update mtl.p with destination parent ID
+          await Promise.allSettled(
+            mtlChildrenSrc.map(async (srcChild) => {
+              const srcChildId = srcChild._id || srcChild.id;
+              const destChildId = idMap[srcChildId];
+              if (!destChildId) return;
+              const destParentId = idMap[srcChild.mtl.p];
+              if (!destParentId) return;
+              try {
+                const destChild = await destClient.getListingById(destChildId);
+                if (!destChild?.mtl) return;
+                await destClient.updateListing(destChildId, { mtl: { ...destChild.mtl, p: destParentId } });
+                log.info(`listings: mtl.p remapped`, { destChildId, destParentId });
+              } catch (err) {
+                log.warn(`listings: mtl.p PATCH failed`, {
+                  destChildId,
                   status: err.response?.status,
                   error: err.response?.data?.message || err.message,
                 });
