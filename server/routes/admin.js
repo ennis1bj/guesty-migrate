@@ -370,22 +370,33 @@ router.get('/migrations/:id/diagnose-listings', async (req, res) => {
         const l = await destClient.getListingById(destId);
         return {
           srcId, destId,
+          allKeys: l ? Object.keys(l).sort() : null,
           type: l?.type,
           listingType: l?.listingType,
           parentId: l?.parentId,
           complexId: l?.complexId,
+          // also check alternate field names Guesty may use
+          parentListingId: l?.parentListingId,
+          mtlParentId: l?.mtlParentId,
           title: l?.title,
         };
       })
     );
 
+    // Return full raw parent + one sub-unit for field-name discovery
+    const firstSub = subSamples[0]?.status === 'fulfilled'
+      ? subSamples[0].value._raw
+      : null;
+
     res.json({
       destParentId,
+      parentAllKeys: parent ? Object.keys(parent).sort() : null,
       parent: parent ? {
         type: parent.type,
         listingType: parent.listingType,
         parentId: parent.parentId,
         complexId: parent.complexId,
+        subListingsIds: parent.subListingsIds,
         subListingsIdsCount: Array.isArray(parent.subListingsIds) ? parent.subListingsIds.length : null,
         title: parent.title,
       } : null,
