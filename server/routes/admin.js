@@ -412,6 +412,65 @@ router.get('/migrations/:id/diagnose-listings', async (req, res) => {
   }
 });
 
+// ── POST /api/admin/migrations/:id/test-mtl-patch ────────────────────────────
+// One-shot test: tries to SET mtl.p on a single sub-unit using the parent's
+// mtl._id (not listing _id) and then reads it back to confirm persistence.
+// Body: { destSubUnitId, destParentMtlId }
+router.post('/migrations/:id/test-mtl-patch', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { destSubUnitId, destParentMtlId } = req.body;
+    if (!destSubUnitId || !destParentMtlId) {
+      return res.status(400).json({ error: 'destSubUnitId and destParentMtlId are required' });
+    }
+    const migResult = await pool.query(
+      `SELECT dest_client_id, dest_client_secret FROM migrations WHERE id = $1`, [id]
+    );
+    if (migResult.rowCount === 0) return res.status(404).json({ error: 'Not found' });
+    const row = migResult.rows[0];
+    const destClient = new GuestyClient({
+      clientId: decrypt(row.dest_client_id),
+      clientSecret: decrypt(row.dest_client_secret),
+    });
+
+    const before = await destClient.getListingById(destSubUnitId);
+    const beforeMtl = before?.mtl;
+
+    // Attempt 1: set mtl.p to parent's mtl._id
+    try {
+      await destClient.updateListing(destSubUnitId, {
+        mtl: { ...beforeMtl, p: destParentMtlId, c: [] },
+      });
+    } catch (err) {
+      logger.warn('test-mtl-patch PUT failed', { error: err.message });
+    }
+
+    const afterMtl = (await destClient.getListingById(destSubUnitId))?.mtl;
+
+    // Attempt 2: try setting parentId directly
+    let afterParentIdMtl = null;
+    try {
+      await destClient.updateListing(destSubUnitId, { parentId: destParentMtlId });
+      afterParentIdMtl = (await destClient.getListingById(destSubUnitId))?.mtl;
+    } catch (err) {
+      logger.warn('test-mtl-patch parentId PUT failed', { error: err.message });
+    }
+
+    res.json({
+      destSubUnitId,
+      destParentMtlId,
+      beforeMtlP: beforeMtl?.p,
+      afterMtlPatchMtlP: afterMtl?.p,
+      mtlPatchWorked: afterMtl?.p === destParentMtlId,
+      afterParentIdPatchMtlP: afterParentIdMtl?.p,
+      parentIdPatchWorked: afterParentIdMtl?.p === destParentMtlId,
+    });
+  } catch (err) {
+    logger.error('test-mtl-patch error', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /api/admin/migrations/:id/fix-mtl-relationships ─────────────────────
 // Backfills mtl.c on parent listings (children list) and mtl.p on sub-unit
 // listings (parent back-ref) with correctly remapped DESTINATION IDs.
