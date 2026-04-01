@@ -673,6 +673,19 @@ class GuestyClient {
     return this.request('PUT', `/listings/${listingId}/availability-settings`, settings);
   }
 
+  async getListingById(listingId) {
+    try {
+      return await this.request('GET', `/listings/${listingId}`);
+    } catch (err) {
+      if (err.response?.status === 404) return null;
+      throw err;
+    }
+  }
+
+  async updateListing(listingId, fields) {
+    return this.request('PUT', `/listings/${listingId}`, fields);
+  }
+
   async getListingAvailabilitySettings(listingId) {
     try {
       return await this.request('GET', `/listings/${listingId}/availability-settings`);

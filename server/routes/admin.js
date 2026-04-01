@@ -377,58 +377,117 @@ router.post('/migrations/:id/fix-listing-subresources', async (req, res) => {
     res.json({ ok: true, queued: true, listingCount: pairs.length });
 
     // ── Background fix ─────────────────────────────────────────────────────
-    const { stripFieldsDeep } = require('../migrationEngine');
     const log = logger.child({ migrationId: id, op: 'fix-listing-subresources' });
-    log.info(`Starting spaces + availability-settings backfill for ${pairs.length} listings`);
+    log.info(`Starting complexId + availability-settings backfill for ${pairs.length} listings`);
 
-    let spaceOk = 0, spaceSkip = 0, spaceFail = 0;
+    // ── Step 1: Resolve destination parent's complexId ──────────────────────
+    // The source parent MTL listing ID is known.  Look it up in idMap to get
+    // the destination listing ID, then GET that listing from Guesty to read
+    // the complexId Guesty auto-assigned when we created it.
+    const SOURCE_PARENT_ID = '63779e9e778ddc00302697ba';
+    const destParentId = idMap[SOURCE_PARENT_ID];
+    let destComplexId = null;
+
+    if (destParentId) {
+      try {
+        const destParent = await destClient.getListingById(destParentId);
+        destComplexId = destParent?.complexId || null;
+        log.info(`Dest parent fetched`, {
+          destParentId,
+          destComplexId,
+          srcComplexId: '6724e1f4227b66e41755179f',
+          complexIdChanged: destComplexId !== '6724e1f4227b66e41755179f',
+        });
+      } catch (err) {
+        log.warn(`Failed to fetch dest parent listing`, { destParentId, error: err.message });
+      }
+    } else {
+      log.warn(`Source parent ${SOURCE_PARENT_ID} not found in idMap`);
+    }
+
+    let complexOk = 0, complexSkip = 0, complexFail = 0;
     let availOk = 0, availFail = 0;
+    let spaceOk = 0, spaceFail = 0;
 
     await Promise.allSettled(
       pairs.map(async ([srcId, destId]) => {
-        // Spaces
-        try {
-          const spaces = await sourceClient.getListingSpaces(srcId);
-          if (Array.isArray(spaces) && spaces.length > 0) {
-            for (const space of spaces) {
-              const cleaned = stripFieldsDeep(space);
-              try {
-                await destClient.createListingSpace(destId, cleaned);
-                spaceOk++;
-              } catch (spErr) {
-                if (spErr.response?.status === 409) { spaceSkip++; }
-                else { spaceFail++; log.warn(`space create failed dest=${destId}`, { error: spErr.response?.data?.message || spErr.message }); }
-              }
+        const isParent = srcId === SOURCE_PARENT_ID;
+
+        // ── Fix complexId on sub-units ───────────────────────────────────────
+        // The destination sub-units were created with the SOURCE account's
+        // complexId (which doesn't exist in the destination).  Guesty's UI
+        // fetches this complex entity when rendering a listing page; if it
+        // returns 404, the page errors out.  PATCH each sub-unit with the
+        // destination parent's complexId.
+        if (!isParent && destComplexId) {
+          try {
+            await destClient.updateListing(destId, { complexId: destComplexId });
+            complexOk++;
+          } catch (err) {
+            const status = err.response?.status;
+            // 409/422 = already correct or read-only — not a real failure
+            if (status === 409 || status === 422) { complexSkip++; }
+            else {
+              complexFail++;
+              log.warn(`complexId update failed dest=${destId}`, {
+                status,
+                error: err.response?.data?.message || err.message,
+              });
             }
-          } else {
-            spaceSkip++;
           }
-        } catch (err) {
-          spaceFail++;
-          log.warn(`spaces fetch failed src=${srcId}`, { error: err.message });
+        } else if (!isParent) {
+          complexSkip++;
         }
 
-        // Availability settings
+        // ── PUT availability-settings (default values) ───────────────────────
+        // GET /listings/{id}/availability-settings returns 404 for channel-
+        // connected source listings; their settings live in the channel sync.
+        // Rather than copying from source, push a safe default so the Guesty
+        // dashboard has a settings document to read.
         try {
-          const avail = await sourceClient.getListingAvailabilitySettings(srcId);
-          if (avail && typeof avail === 'object') {
-            const cleaned = stripFieldsDeep(avail);
-            try {
-              await destClient.updateListingAvailabilitySettings(destId, cleaned);
-              availOk++;
-            } catch (avErr) {
-              availFail++;
-              log.warn(`availability-settings update failed dest=${destId}`, { error: avErr.response?.data?.message || avErr.message });
-            }
-          }
-        } catch (err) {
+          const defaultAvail = {
+            defaultAvailability: 'available',
+            advanceNotice: 1,
+            preparationTime: 0,
+            checkIn: { from: '15:00', to: '23:00' },
+            checkOut: { until: '11:00' },
+            minimumStay: 1,
+          };
+          await destClient.updateListingAvailabilitySettings(destId, defaultAvail);
+          availOk++;
+        } catch (avErr) {
           availFail++;
-          log.warn(`availability-settings fetch failed src=${srcId}`, { error: err.message });
+          log.warn(`availability-settings update failed dest=${destId}`, {
+            error: avErr.response?.data?.message || avErr.message,
+          });
+        }
+
+        // ── POST default space (best-effort) ─────────────────────────────────
+        // Guesty's dashboard expects at least one space sub-resource.  The
+        // GET /spaces endpoint returns empty for channel-linked source listings,
+        // so we create a minimal default in the destination.
+        try {
+          await destClient.createListingSpace(destId, { type: 'ENTIRE_PLACE' });
+          spaceOk++;
+        } catch (spErr) {
+          // 409 = already exists; 400/422 = schema mismatch — both non-fatal
+          if (spErr.response?.status !== 409) {
+            log.warn(`space POST failed dest=${destId}`, {
+              status: spErr.response?.status,
+              error: spErr.response?.data?.message || spErr.message,
+            });
+          }
+          // Don't count 400/422 as hard failures since space schema is guesswork
+          spaceFail++;
         }
       })
     );
 
-    log.info(`Backfill complete`, { spaceOk, spaceSkip, spaceFail, availOk, availFail });
+    log.info(`Backfill complete`, {
+      complexOk, complexSkip, complexFail,
+      availOk, availFail,
+      spaceOk, spaceFail,
+    });
   } catch (err) {
     logger.error('Admin fix-listing-subresources error', { error: err.message });
     if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
