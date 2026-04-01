@@ -387,6 +387,7 @@ router.post('/migrations/:id/fix-listing-subresources', async (req, res) => {
 
     let complexClearOk = 0, complexClearFail = 0, complexUpdateOk = 0, complexUpdateFail = 0;
     let availOk = 0, availFail = 0;
+    let subListingsOk = false, roomsInfoOk = false;
 
     // ── Step 1: Clear orphaned complexId on the PARENT listing ──────────────
     // When the MTL parent was created, we forwarded the source account's complexId.
@@ -475,7 +476,6 @@ router.post('/migrations/:id/fix-listing-subresources', async (req, res) => {
     // were not in SOURCE_ONLY_FIELDS at migration time).  Guesty's
     // "Details and Layout" reads this array to show assigned units.
     // Replace it with destination sub-unit IDs derived from the idMap.
-    let subListingsOk = false;
     if (destParentId) {
       const destSubUnitIds = Object.entries(idMap)
         .filter(([srcId]) => srcId !== SOURCE_PARENT_ID)
@@ -497,22 +497,72 @@ router.post('/migrations/:id/fix-listing-subresources', async (req, res) => {
         });
       }
 
-      // ── Diagnostic: log bathroom/room info from destination parent ───────
-      // This tells us whether bathroom data came over during the original
-      // migration so we know if a separate bathroom backfill is needed.
+      // ── Step 5: Copy roomsInfo from source parent → destination parent ────
+      // The destination parent's roomsInfo is null (confirmed by diagnostic).
+      // Fetch the source parent to check if roomsInfo exists there.
+      // If it does, PATCH the destination with it so the "Details and Layout"
+      // section in Guesty's dashboard shows the correct bathroom/bedroom info.
+      try {
+        const srcParent = await sourceClient.getListingById(SOURCE_PARENT_ID);
+        log.info(`Source parent diagnostic`, {
+          srcParentId: SOURCE_PARENT_ID,
+          bathrooms: srcParent?.bathrooms ?? 'MISSING',
+          bedrooms: srcParent?.bedrooms ?? 'MISSING',
+          accommodates: srcParent?.accommodates ?? 'MISSING',
+          roomsInfoCount: Array.isArray(srcParent?.roomsInfo) ? srcParent.roomsInfo.length : 'MISSING',
+          propertyType: srcParent?.propertyType ?? 'MISSING',
+        });
+
+        // Build a PATCH payload with all room/property layout fields
+        const layoutPatch = {};
+        if (typeof srcParent?.bathrooms === 'number') layoutPatch.bathrooms = srcParent.bathrooms;
+        if (typeof srcParent?.bedrooms === 'number') layoutPatch.bedrooms = srcParent.bedrooms;
+        if (typeof srcParent?.accommodates === 'number') layoutPatch.accommodates = srcParent.accommodates;
+        if (Array.isArray(srcParent?.roomsInfo) && srcParent.roomsInfo.length > 0) {
+          const { stripFieldsDeep } = require('../migrationEngine');
+          layoutPatch.roomsInfo = stripFieldsDeep(srcParent.roomsInfo);
+        }
+        if (srcParent?.propertyType && typeof srcParent.propertyType === 'object') {
+          const { stripFieldsDeep } = require('../migrationEngine');
+          layoutPatch.propertyType = stripFieldsDeep(srcParent.propertyType);
+        }
+
+        if (Object.keys(layoutPatch).length > 0) {
+          try {
+            await destClient.updateListing(destParentId, layoutPatch);
+            roomsInfoOk = true;
+            log.info(`Layout fields patched on destination parent`, {
+              destParentId,
+              fields: Object.keys(layoutPatch),
+            });
+          } catch (patchErr) {
+            log.warn(`Layout PATCH failed on destination parent`, {
+              destParentId,
+              status: patchErr.response?.status,
+              error: patchErr.response?.data?.message || patchErr.message,
+            });
+          }
+        } else {
+          log.info(`No layout fields to patch — source parent has no roomsInfo/bathrooms data`);
+        }
+      } catch (err) {
+        log.warn(`Failed to fetch source parent for layout backfill`, { error: err.message });
+      }
+
+      // ── Diagnostic: re-read destination parent after all patches ──────────
       try {
         const current = await destClient.getListingById(destParentId);
-        log.info(`Destination parent diagnostic`, {
+        log.info(`Destination parent after all patches`, {
           destParentId,
           bathrooms: current?.bathrooms ?? 'MISSING',
           bedrooms: current?.bedrooms ?? 'MISSING',
           accommodates: current?.accommodates ?? 'MISSING',
           roomsInfoCount: Array.isArray(current?.roomsInfo) ? current.roomsInfo.length : 'MISSING',
-          subListingsIdsCount: Array.isArray(current?.subListingsIds) ? current.subListingsIds.length : 'MISSING',
         });
       } catch (err) {
-        log.warn(`Failed to fetch destination parent for diagnostic`, { error: err.message });
+        log.warn(`Failed to re-fetch destination parent for final diagnostic`, { error: err.message });
       }
+
     }
 
     log.info(`Backfill complete`, {
@@ -520,6 +570,7 @@ router.post('/migrations/:id/fix-listing-subresources', async (req, res) => {
       complexUpdateOk, complexUpdateFail,
       availOk, availFail,
       subListingsOk,
+      roomsInfoOk,
       newComplexId,
     });
   } catch (err) {
