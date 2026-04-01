@@ -378,115 +378,103 @@ router.post('/migrations/:id/fix-listing-subresources', async (req, res) => {
 
     // ── Background fix ─────────────────────────────────────────────────────
     const log = logger.child({ migrationId: id, op: 'fix-listing-subresources' });
-    log.info(`Starting complexId + availability-settings backfill for ${pairs.length} listings`);
+    log.info(`Starting complexId-clear + availability-settings backfill for ${pairs.length} listings`);
 
-    // ── Step 1: Resolve destination parent's complexId ──────────────────────
-    // The source parent MTL listing ID is known.  Look it up in idMap to get
-    // the destination listing ID, then GET that listing from Guesty to read
-    // the complexId Guesty auto-assigned when we created it.
+    // ── Constants ───────────────────────────────────────────────────────────
     const SOURCE_PARENT_ID = '63779e9e778ddc00302697ba';
-    const destParentId = idMap[SOURCE_PARENT_ID];
-    let destComplexId = null;
+    const STALE_COMPLEX_ID  = '6724e1f4227b66e41755179f'; // source-account entity — invalid in dest
+    const destParentId      = idMap[SOURCE_PARENT_ID];
 
+    let complexClearOk = 0, complexClearFail = 0, complexUpdateOk = 0, complexUpdateFail = 0;
+    let availOk = 0, availFail = 0;
+
+    // ── Step 1: Clear orphaned complexId on the PARENT listing ──────────────
+    // When the MTL parent was created, we forwarded the source account's complexId.
+    // That complex entity does not exist in the destination account, so Guesty's
+    // dashboard returns a 404 when trying to resolve it → UI error.
+    // Clearing it (null) should prompt Guesty to auto-assign a valid destination
+    // complex entity.
+    let newComplexId = null;
     if (destParentId) {
       try {
-        const destParent = await destClient.getListingById(destParentId);
-        destComplexId = destParent?.complexId || null;
-        log.info(`Dest parent fetched`, {
-          destParentId,
-          destComplexId,
-          srcComplexId: '6724e1f4227b66e41755179f',
-          complexIdChanged: destComplexId !== '6724e1f4227b66e41755179f',
-        });
+        log.info(`Clearing complexId on parent`, { destParentId, staleComplexId: STALE_COMPLEX_ID });
+        await destClient.updateListing(destParentId, { complexId: null });
+        // Wait briefly then re-fetch to see what Guesty assigned
+        await new Promise(r => setTimeout(r, 2000));
+        const refreshed = await destClient.getListingById(destParentId);
+        newComplexId = refreshed?.complexId || null;
+        log.info(`Parent complexId after clear`, { destParentId, newComplexId });
+        complexClearOk++;
       } catch (err) {
-        log.warn(`Failed to fetch dest parent listing`, { destParentId, error: err.message });
+        complexClearFail++;
+        log.warn(`complexId clear failed on parent`, {
+          destParentId,
+          status: err.response?.status,
+          error: err.response?.data?.message || err.message,
+        });
       }
     } else {
-      log.warn(`Source parent ${SOURCE_PARENT_ID} not found in idMap`);
+      log.warn(`Source parent ${SOURCE_PARENT_ID} not found in idMap — cannot clear complexId`);
     }
 
-    let complexOk = 0, complexSkip = 0, complexFail = 0;
-    let availOk = 0, availFail = 0;
-    let spaceOk = 0, spaceFail = 0;
-
-    await Promise.allSettled(
-      pairs.map(async ([srcId, destId]) => {
-        const isParent = srcId === SOURCE_PARENT_ID;
-
-        // ── Fix complexId on sub-units ───────────────────────────────────────
-        // The destination sub-units were created with the SOURCE account's
-        // complexId (which doesn't exist in the destination).  Guesty's UI
-        // fetches this complex entity when rendering a listing page; if it
-        // returns 404, the page errors out.  PATCH each sub-unit with the
-        // destination parent's complexId.
-        if (!isParent && destComplexId) {
+    // ── Step 2: Update all sub-units to use the (new or cleared) complexId ──
+    // If Guesty auto-assigned a proper complexId to the parent, propagate it to
+    // all sub-units.  If complexId came back null (Guesty didn't auto-assign),
+    // we still clear the stale value so it's no longer an orphaned reference.
+    const subUnitPairs = pairs.filter(([srcId]) => srcId !== SOURCE_PARENT_ID);
+    const CONCURRENCY = 10;
+    for (let i = 0; i < subUnitPairs.length; i += CONCURRENCY) {
+      const chunk = subUnitPairs.slice(i, i + CONCURRENCY);
+      await Promise.allSettled(
+        chunk.map(async ([, destId]) => {
           try {
-            await destClient.updateListing(destId, { complexId: destComplexId });
-            complexOk++;
+            await destClient.updateListing(destId, { complexId: newComplexId });
+            complexUpdateOk++;
           } catch (err) {
-            const status = err.response?.status;
-            // 409/422 = already correct or read-only — not a real failure
-            if (status === 409 || status === 422) { complexSkip++; }
-            else {
-              complexFail++;
-              log.warn(`complexId update failed dest=${destId}`, {
-                status,
-                error: err.response?.data?.message || err.message,
-              });
-            }
+            complexUpdateFail++;
+            log.warn(`complexId update failed on sub-unit`, {
+              destId,
+              status: err.response?.status,
+              error: err.response?.data?.message || err.message,
+            });
           }
-        } else if (!isParent) {
-          complexSkip++;
-        }
+        })
+      );
+    }
 
-        // ── PUT availability-settings (default values) ───────────────────────
-        // GET /listings/{id}/availability-settings returns 404 for channel-
-        // connected source listings; their settings live in the channel sync.
-        // Rather than copying from source, push a safe default so the Guesty
-        // dashboard has a settings document to read.
-        try {
-          const defaultAvail = {
+    // ── Step 3: Fix availability-settings on PARENT only ────────────────────
+    // Guesty rejects availability-settings updates on MTL_CHILD listings
+    // ("must update parent unit").  Only the parent gets the PUT.
+    // Correct payload format: { calendarRules: { ... } } — wrapping is required.
+    if (destParentId) {
+      try {
+        await destClient.updateListingAvailabilitySettings(destParentId, {
+          calendarRules: {
             defaultAvailability: 'available',
             advanceNotice: 1,
             preparationTime: 0,
             checkIn: { from: '15:00', to: '23:00' },
             checkOut: { until: '11:00' },
             minimumStay: 1,
-          };
-          await destClient.updateListingAvailabilitySettings(destId, defaultAvail);
-          availOk++;
-        } catch (avErr) {
-          availFail++;
-          log.warn(`availability-settings update failed dest=${destId}`, {
-            error: avErr.response?.data?.message || avErr.message,
-          });
-        }
-
-        // ── POST default space (best-effort) ─────────────────────────────────
-        // Guesty's dashboard expects at least one space sub-resource.  The
-        // GET /spaces endpoint returns empty for channel-linked source listings,
-        // so we create a minimal default in the destination.
-        try {
-          await destClient.createListingSpace(destId, { type: 'ENTIRE_PLACE' });
-          spaceOk++;
-        } catch (spErr) {
-          // 409 = already exists; 400/422 = schema mismatch — both non-fatal
-          if (spErr.response?.status !== 409) {
-            log.warn(`space POST failed dest=${destId}`, {
-              status: spErr.response?.status,
-              error: spErr.response?.data?.message || spErr.message,
-            });
-          }
-          // Don't count 400/422 as hard failures since space schema is guesswork
-          spaceFail++;
-        }
-      })
-    );
+          },
+        });
+        availOk++;
+        log.info(`availability-settings updated on parent`, { destParentId });
+      } catch (avErr) {
+        availFail++;
+        log.warn(`availability-settings update failed on parent`, {
+          destParentId,
+          status: avErr.response?.status,
+          error: avErr.response?.data?.message || avErr.message,
+        });
+      }
+    }
 
     log.info(`Backfill complete`, {
-      complexOk, complexSkip, complexFail,
+      complexClearOk, complexClearFail,
+      complexUpdateOk, complexUpdateFail,
       availOk, availFail,
-      spaceOk, spaceFail,
+      newComplexId,
     });
   } catch (err) {
     logger.error('Admin fix-listing-subresources error', { error: err.message });

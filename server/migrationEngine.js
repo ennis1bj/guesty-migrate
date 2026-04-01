@@ -45,6 +45,10 @@ const SOURCE_ONLY_FIELDS = new Set([
   '_id', 'accountId', 'createdAt', 'updatedAt',
   'channelListingId', 'importedAt', 'integrations',
   'id',
+  // complexId is account-scoped — Guesty auto-assigns when parentId is provided.
+  // Including it causes the destination to store an orphaned reference to a source
+  // account complex entity that doesn't exist in the destination. → dashboard errors.
+  'complexId',
   // NOTE: parentId is intentionally NOT in this set — it needs remapping for complex listings
 ]);
 
