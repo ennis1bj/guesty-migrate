@@ -4,6 +4,7 @@ const { authenticateToken, requireAdmin } = require('../auth');
 const { logger } = require('../logger');
 const { decrypt } = require('../encryption');
 const GuestyClient = require('../guestyClient');
+const { stripFieldsDeep } = require('../migrationEngine');
 
 const router = express.Router();
 
@@ -636,6 +637,135 @@ router.post('/migrations/:id/fix-mtl-relationships', async (req, res) => {
     log.info('fix-mtl-relationships complete', results);
   } catch (err) {
     logger.error('fix-mtl-relationships error', { error: err.message });
+  }
+});
+
+// ── POST /api/admin/migrations/:id/recreate-sub-units ────────────────────────
+// Deletes and re-creates destination sub-unit listings whose mtl.p value
+// matches `targetMtlP` so that Guesty auto-populates the mtl relationship
+// from scratch using the provided `destParentId`.
+//
+// This is the only reliable fix when mtl.p is wrong on destination sub-units
+// (the Open API silently ignores PUT /listings/:id with { mtl: ... }).
+//
+// Body: {
+//   targetMtlP: string,    // current wrong mtl.p value that identifies the group
+//   destParentId: string,  // correct dest parent listing ID to link them to
+//   dryRun?: boolean       // if true, report matches without deleting/recreating
+// }
+//
+// Runs async; returns 202 with initial count.  Progress visible in server logs.
+router.post('/migrations/:id/recreate-sub-units', async (req, res) => {
+  const ADDITIONAL_STRIP = new Set([
+    '__v', 'lastUpdatedAt', 'lastActivityAt', 'cleaningStatus',
+    'pendingTasks', 'occupancyStats', 'SaaS', 'sourceOfCreation', 'pms',
+    'activeReservationCount', 'sales', 'commissionFormula',
+    'netIncomeFormula', 'ownerRevenueFormula',
+  ]);
+
+  function cleanForRecreate(listing) {
+    const stripped = stripFieldsDeep(listing); // removes SOURCE_ONLY_FIELDS incl. mtl
+    const cleaned = {};
+    for (const [k, v] of Object.entries(stripped)) {
+      if (!ADDITIONAL_STRIP.has(k)) cleaned[k] = v;
+    }
+    return cleaned;
+  }
+
+  try {
+    const { id } = req.params;
+    const { targetMtlP, destParentId, dryRun = false } = req.body;
+    if (!targetMtlP || !destParentId) {
+      return res.status(400).json({ error: 'targetMtlP and destParentId are required' });
+    }
+
+    const migResult = await pool.query(
+      `SELECT dest_client_id, dest_client_secret, results FROM migrations WHERE id = $1`,
+      [id]
+    );
+    if (migResult.rowCount === 0) return res.status(404).json({ error: 'Not found' });
+    const row = migResult.rows[0];
+    const idMap = { ...(row.results?.listings?.idMap || {}) };
+    const allDestIds = Object.values(idMap);
+
+    const destClient = new GuestyClient({
+      clientId: decrypt(row.dest_client_id),
+      clientSecret: decrypt(row.dest_client_secret),
+    });
+
+    res.status(202).json({ message: 'recreate-sub-units started', totalListings: allDestIds.length, dryRun });
+
+    // Step 1: fetch mtl.p for each listing in parallel (semaphored inside GuestyClient)
+    logger.info('recreate-sub-units: scanning all dest listings for mtl.p', { migrationId: id, count: allDestIds.length });
+    const mtlPResults = await Promise.allSettled(
+      allDestIds.map(async destId => {
+        const l = await destClient.getListingById(destId);
+        return { destId, mtlP: l?.mtl?.p ?? null, type: l?.type };
+      })
+    );
+
+    // Step 2: identify matches
+    const matches = mtlPResults
+      .filter(r => r.status === 'fulfilled' && r.value.mtlP === targetMtlP)
+      .map(r => r.value.destId);
+
+    logger.info('recreate-sub-units: identified matching sub-units', { migrationId: id, targetMtlP, count: matches.length, dryRun });
+
+    if (dryRun) {
+      logger.info('recreate-sub-units: dry-run complete', { migrationId: id, matches });
+      return;
+    }
+
+    // Step 3: for each match, fetch full data → delete → recreate
+    const reversedIdMap = Object.fromEntries(Object.entries(idMap).map(([s, d]) => [d, s]));
+    const idMapUpdates = {}; // srcId → newDestId
+
+    let ok = 0; let failed = 0;
+    for (const oldDestId of matches) {
+      try {
+        const fullListing = await destClient.getListingById(oldDestId);
+        if (!fullListing) throw new Error('Could not fetch listing ' + oldDestId);
+
+        const payload = cleanForRecreate(fullListing);
+        payload.parentId = destParentId;
+        // Ensure correct type
+        payload.type = 'MTL_CHILD';
+
+        // Delete old sub-unit
+        await destClient.request('DELETE', `/listings/${oldDestId}`);
+        logger.info('recreate-sub-units: deleted old sub-unit', { migrationId: id, oldDestId });
+
+        // Recreate
+        const created = await destClient.request('POST', '/listings', payload);
+        const newDestId = created?._id;
+        if (!newDestId) throw new Error('No _id returned from POST /listings for ' + oldDestId);
+
+        logger.info('recreate-sub-units: recreated sub-unit', { migrationId: id, oldDestId, newDestId });
+
+        // Track idMap update
+        const srcId = reversedIdMap[oldDestId];
+        if (srcId) idMapUpdates[srcId] = newDestId;
+
+        ok++;
+      } catch (err) {
+        logger.error('recreate-sub-units: failed for sub-unit', { migrationId: id, oldDestId, error: err.message });
+        failed++;
+      }
+    }
+
+    // Step 4: persist idMap updates
+    if (Object.keys(idMapUpdates).length > 0) {
+      const current = await pool.query(`SELECT results FROM migrations WHERE id = $1`, [id]);
+      const results = current.rows[0]?.results || {};
+      const newIdMap = { ...(results.listings?.idMap || {}), ...idMapUpdates };
+      const updatedResults = { ...results, listings: { ...results.listings, idMap: newIdMap } };
+      await pool.query(`UPDATE migrations SET results = $1 WHERE id = $2`, [JSON.stringify(updatedResults), id]);
+      logger.info('recreate-sub-units: idMap updated', { migrationId: id, updated: Object.keys(idMapUpdates).length });
+    }
+
+    logger.info('recreate-sub-units: complete', { migrationId: id, ok, failed, idMapUpdated: Object.keys(idMapUpdates).length });
+  } catch (err) {
+    logger.error('recreate-sub-units error', { error: err.message });
   }
 });
 
