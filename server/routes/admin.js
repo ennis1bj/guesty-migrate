@@ -413,7 +413,283 @@ router.get('/migrations/:id/diagnose-listings', async (req, res) => {
   }
 });
 
+// ── POST /api/admin/migrations/:id/tag-cluster-subunits ──────────────────────
+// Fetches all dest listings (with tags) and groups orphaned MTL_CHILD sub-units
+// by their wrong mtl.p value, showing the tag profiles of each group.
+// Returns: { groups: { wrongMtlP → { count, nicknames[], tagProfile: {} } }, parents: [] }
+router.post('/migrations/:id/tag-cluster-subunits', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const migResult = await pool.query(
+      'SELECT dest_client_id, dest_client_secret FROM migrations WHERE id = $1',
+      [id]
+    );
+    if (migResult.rows.length === 0) return res.status(404).json({ error: 'Migration not found' });
+    const row = migResult.rows[0];
+
+    const destClient = new GuestyClient({
+      clientId: decrypt(row.dest_client_id),
+      clientSecret: decrypt(row.dest_client_secret),
+    });
+
+    const allListings = await destClient.getAllListings({ fields: '_id,type,title,nickname,mtl,tags' });
+    const destParents = allListings.filter(l => l.type === 'MTL' && l.mtl?._id);
+    const correctMtlIds = new Set(destParents.map(p => p.mtl._id));
+
+    // Group orphaned sub-units by their wrong mtl.p
+    const groups = {};
+    const wrongSubUnits = allListings.filter(l =>
+      l.type === 'MTL_CHILD' && l.mtl?.p && !correctMtlIds.has(l.mtl.p)
+    );
+    for (const su of wrongSubUnits) {
+      const key = su.mtl.p;
+      if (!groups[key]) groups[key] = { count: 0, nicknames: [], tagFreq: {} };
+      const g = groups[key];
+      g.count++;
+      g.nicknames.push(su.nickname || su.title || su._id);
+      for (const tag of (su.tags || [])) {
+        g.tagFreq[tag] = (g.tagFreq[tag] || 0) + 1;
+      }
+    }
+
+    // Parent info
+    const parents = destParents.map(p => ({
+      id: p._id,
+      mtlId: p.mtl._id,
+      title: p.title || p.nickname,
+      expectedCount: (p.mtl.c || []).length,
+      tags: p.tags || [],
+    }));
+
+    res.json({ groups, parents, wrongTotal: wrongSubUnits.length });
+  } catch (err) {
+    logger.error('tag-cluster-subunits error', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /api/admin/migrations/:id/test-mtl-patch ────────────────────────────
+// ── POST /api/admin/migrations/:id/match-mtl-children ────────────────────────
+// Probe: for each dest MTL parent, try querying the DEST Guesty API for its sub-units
+// using the filters[parentId] query and the dedicated /sub-units endpoint.
+// Returns: { parentId → { found: [{ id, title, type }] } }
+router.post('/migrations/:id/probe-dest-subunits', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const migResult = await pool.query(
+      'SELECT source_client_id, source_client_secret, dest_client_id, dest_client_secret FROM migrations WHERE id = $1',
+      [id]
+    );
+    if (migResult.rows.length === 0) return res.status(404).json({ error: 'Migration not found' });
+    const row = migResult.rows[0];
+
+    const destClient = new GuestyClient({
+      clientId: decrypt(row.dest_client_id),
+      clientSecret: decrypt(row.dest_client_secret),
+    });
+
+    const allDestListings = await destClient.getAllListings({ fields: '_id,type,title,nickname,mtl' });
+    const destParentListings = allDestListings.filter(l => l.type === 'MTL' && l.mtl?._id);
+    const allMtlIds = new Set(destParentListings.map(p => p.mtl._id));
+
+    const result = {};
+    for (const parent of destParentListings) {
+      const isFixed = allDestListings.some(l => l.type === 'MTL_CHILD' && l.mtl?.p === parent.mtl._id);
+      try {
+        const subUnits = await destClient.getSubUnitsByListingId(parent._id);
+        result[parent._id] = {
+          parentTitle: parent.title || parent.nickname,
+          parentMtlId: parent.mtl._id,
+          isFixed,
+          found: subUnits.map(s => ({ id: s._id, title: s.title || s.nickname, mtlP: s.mtl?.p })),
+        };
+      } catch (err) {
+        result[parent._id] = {
+          parentTitle: parent.title || parent.nickname,
+          parentMtlId: parent.mtl._id,
+          isFixed,
+          error: err.message,
+          found: [],
+        };
+      }
+    }
+
+    res.json({ result });
+  } catch (err) {
+    logger.error('probe-dest-subunits error', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// For each dest MTL parent, fetches the source sub-units (via source Guesty API)
+// using the source sub-unit IDs stored in dest parent's mtl.c, then matches
+// those source sub-units to dest sub-units by title.
+// Returns: { parentId → { parentTitle, expectedCount, sourceChildTitles: [{ sourceId, title }] } }
+router.post('/migrations/:id/match-mtl-children', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const migResult = await pool.query(
+      `SELECT source_client_id, source_client_secret, dest_client_id, dest_client_secret FROM migrations WHERE id = $1`, [id]
+    );
+    if (migResult.rowCount === 0) return res.status(404).json({ error: 'Not found' });
+    const row = migResult.rows[0];
+    const sourceClient = new GuestyClient({
+      clientId: decrypt(row.source_client_id),
+      clientSecret: decrypt(row.source_client_secret),
+    });
+    const destClient = new GuestyClient({
+      clientId: decrypt(row.dest_client_id),
+      clientSecret: decrypt(row.dest_client_secret),
+    });
+
+    // Get all dest listings
+    const allDestListings = await destClient.getAllListings({ fields: '_id,type,title,nickname,mtl' });
+    const destParentListings = allDestListings.filter(l => l.type === 'MTL' && l.mtl?._id);
+
+    // Strategy: fetch each source sub-unit from the source account and read its
+    // mtl._id. The old migration engine (running at time of this migration) did NOT
+    // strip the 'mtl' field, so it copied source sub-unit mtl.p directly into the
+    // dest sub-unit. For these listings, source sub-unit mtl.p = source sub-unit mtl._id
+    // (a self-referential MTL entity ID). Therefore:
+    //   dest sub-unit wrong mtl.p == source sub-unit mtl._id
+    // This lets us build: sourceMtlId → destParentId, then match each orphaned dest
+    // sub-unit (by its wrong mtl.p) to the correct dest parent.
+
+    // Step 1: Identify "already fixed" parents.
+    const allMtlIds = new Set(destParentListings.map(p => p.mtl._id));
+    const fixedParentMtlIds = new Set();
+    for (const l of allDestListings) {
+      if (l.type === 'MTL_CHILD' && allMtlIds.has(l.mtl?.p)) {
+        fixedParentMtlIds.add(l.mtl.p);
+      }
+    }
+
+    // Step 2: For each unfixed dest parent, fetch source sub-units and map their
+    //         mtl._id → destParentId.
+    const sourceMtlIdToParent = {}; // sourceMtlId → { destParentId, destParentMtlId, parentTitle }
+    const result = {};
+    for (const parent of destParentListings) {
+      if (fixedParentMtlIds.has(parent.mtl._id)) {
+        result[parent._id] = {
+          parentTitle: parent.title || parent.nickname,
+          parentMtlId: parent.mtl._id,
+          status: 'already-fixed',
+          expectedCount: Array.isArray(parent.mtl?.c) ? parent.mtl.c.length : 0,
+        };
+        continue;
+      }
+      const sourceChildIds = Array.isArray(parent.mtl?.c) ? parent.mtl.c : [];
+      if (sourceChildIds.length === 0) {
+        result[parent._id] = { parentTitle: parent.title, parentMtlId: parent.mtl._id, status: 'no-source-children' };
+        continue;
+      }
+
+      // Fetch source sub-units individually to get their mtl._id
+      const sourceChildren = await sourceClient.getListingsByIds(sourceChildIds);
+      const mappings = [];
+      for (const sc of sourceChildren) {
+        const srcMtlId = sc.mtl?._id ?? null;
+        if (srcMtlId) {
+          sourceMtlIdToParent[srcMtlId] = {
+            destParentId: parent._id,
+            destParentMtlId: parent.mtl._id,
+            parentTitle: parent.title || parent.nickname,
+          };
+        }
+        mappings.push({
+          sourceListingId: sc._id,
+          sourceNickname: sc.nickname || null,
+          sourceTitle: sc.title || null,
+          sourceMtlId: srcMtlId,
+          sourceMtlP: sc.mtl?.p ?? null,
+        });
+      }
+
+      result[parent._id] = {
+        parentTitle: parent.title || parent.nickname,
+        parentMtlId: parent.mtl._id,
+        status: 'pending',
+        expectedCount: sourceChildIds.length,
+        fetchedFromSource: sourceChildren.length,
+        mtlIdsMapped: mappings.filter(m => m.sourceMtlId).length,
+        mappings,
+      };
+    }
+
+    // Step 3: Match each orphaned dest sub-unit to its parent using wrong mtl.p == sourceMtlId
+    const wrongDestSubUnits = allDestListings
+      .filter(l => l.type === 'MTL_CHILD' && !allMtlIds.has(l.mtl?.p));
+
+    const matched = [];
+    const unmatched = [];
+    for (const sub of wrongDestSubUnits) {
+      const wrongMtlP = sub.mtl?.p;
+      const parentInfo = wrongMtlP ? sourceMtlIdToParent[wrongMtlP] : null;
+      if (parentInfo) {
+        matched.push({
+          destSubId: sub._id,
+          destTitle: sub.title || sub.nickname,
+          wrongMtlP,
+          ...parentInfo,
+        });
+      } else {
+        unmatched.push({
+          destSubId: sub._id,
+          destTitle: sub.title || sub.nickname,
+          wrongMtlP,
+        });
+      }
+    }
+
+    // Group matched by parent
+    for (const m of matched) {
+      if (result[m.destParentId]) {
+        result[m.destParentId].matchedSubUnits = result[m.destParentId].matchedSubUnits || [];
+        result[m.destParentId].matchedSubUnits.push({ destSubId: m.destSubId, destTitle: m.destTitle, wrongMtlP: m.wrongMtlP });
+        result[m.destParentId].matchedCount = (result[m.destParentId].matchedCount || 0) + 1;
+      }
+    }
+
+    res.json({
+      sourceMtlIdsMapped: Object.keys(sourceMtlIdToParent).length,
+      wrongDestSubUnitsTotal: wrongDestSubUnits.length,
+      matchedCount: matched.length,
+      unmatchedCount: unmatched.length,
+      result,
+      unmatched,
+      sourceMtlIdToParent,
+    });
+  } catch (err) {
+    logger.error('match-mtl-children error', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Quick probe: fetch a single dest listing and return its full structure.
+// Used to inspect subListingsIds, mtl, etc. on any listing.
+// Body: { listingId }
+router.post('/migrations/:id/get-dest-listing', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { listingId } = req.body;
+    if (!listingId) return res.status(400).json({ error: 'listingId required' });
+    const migResult = await pool.query(
+      `SELECT dest_client_id, dest_client_secret FROM migrations WHERE id = $1`, [id]
+    );
+    if (migResult.rowCount === 0) return res.status(404).json({ error: 'Not found' });
+    const row = migResult.rows[0];
+    const destClient = new GuestyClient({
+      clientId: decrypt(row.dest_client_id),
+      clientSecret: decrypt(row.dest_client_secret),
+    });
+    const listing = await destClient.getListingById(listingId);
+    res.json({ listing });
+  } catch (err) {
+    logger.error('get-dest-listing error', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // One-shot test: tries to SET mtl.p on a single sub-unit using the parent's
 // mtl._id (not listing _id) and then reads it back to confirm persistence.
 // Body: { destSubUnitId, destParentMtlId }
@@ -784,6 +1060,370 @@ router.post('/migrations/:id/recreate-sub-units', async (req, res) => {
     logger.info('recreate-sub-units: complete', { migrationId: id, ok, failed, idMapUpdated: Object.keys(idMapUpdates).length });
   } catch (err) {
     logger.error('recreate-sub-units error', { error: err.message });
+  }
+});
+
+// ── POST /api/admin/migrations/:id/scan-and-fix-all-mtl ──────────────────────
+// Scans ALL destination listings for this migration to identify sub-units with
+// incorrect mtl.p values and re-creates them with the correct parent reference.
+// Works without an idMap — discovers parent-child groupings via each sub-unit's
+// parentId field (remapped to the dest parent listing _id at creation time).
+//
+// Body:
+//   dryRun (bool, default false) — report only, no changes
+//
+// Response: 202 with a { report } object (async fix logged to server).
+router.post('/migrations/:id/scan-and-fix-all-mtl', async (req, res) => {
+  const ADDITIONAL_STRIP = new Set([
+    '__v', 'lastUpdatedAt', 'lastActivityAt', 'cleaningStatus',
+    'pendingTasks', 'occupancyStats', 'SaaS', 'sourceOfCreation', 'pms',
+    'activeReservationCount', 'sales', 'commissionFormula',
+    'netIncomeFormula', 'ownerRevenueFormula',
+  ]);
+
+  function cleanForRecreate(listing) {
+    const stripped = stripFieldsDeep(listing);
+    const cleaned = {};
+    for (const [k, v] of Object.entries(stripped)) {
+      if (!ADDITIONAL_STRIP.has(k)) cleaned[k] = v;
+    }
+    return cleaned;
+  }
+
+  try {
+    const { id } = req.params;
+    const { dryRun = false } = req.body;
+
+    const migResult = await pool.query(
+      `SELECT dest_client_id, dest_client_secret, results FROM migrations WHERE id = $1`,
+      [id]
+    );
+    if (migResult.rowCount === 0) return res.status(404).json({ error: 'Not found' });
+    const row = migResult.rows[0];
+
+    const destClient = new GuestyClient({
+      clientId: decrypt(row.dest_client_id),
+      clientSecret: decrypt(row.dest_client_secret),
+    });
+
+    // Step 1: fetch all listings from the destination account
+    logger.info('scan-and-fix-all-mtl: fetching all destination listings', { migrationId: id });
+    const allListings = await destClient.getAllListings();
+    logger.info('scan-and-fix-all-mtl: fetched listings', { migrationId: id, total: allListings.length });
+
+    // Step 2: build parent map  destListingId → { mtlId, title }
+    const parentMap = {};
+    for (const l of allListings) {
+      if (l.type === 'MTL' && l.mtl?._id) {
+        parentMap[l._id] = { mtlId: l.mtl._id, title: l.title || l.nickname || l._id };
+      }
+    }
+
+    // Step 3: individually fetch all dest sub-units using their DEST IDs (from
+    // bulk listing), read their mtl.p value, and group by mtl.p.
+    //
+    // Strategy rationale:
+    //   • parentId is not returned by Guesty GET /listings (bulk or individual)
+    //   • mtl.c on parents contains source-world IDs (not dest IDs) → 403 on fetch
+    //   • complexId API returns 0 for this account tier
+    //   • mtl.p on sub-units IS returned even for individual fetches
+    //   → Group sub-units by their current (wrong) mtl.p; match each group to
+    //     the correct dest parent by count (each parent has a unique sub-unit count).
+    const destSubUnitIds = allListings.filter(l => l.type === 'MTL_CHILD').map(l => l._id);
+    logger.info('scan-and-fix-all-mtl: individually fetching dest sub-units for mtl.p', {
+      migrationId: id, count: destSubUnitIds.length,
+    });
+    const subUnitDetails = await destClient.getListingsByIds(destSubUnitIds);
+    logger.info('scan-and-fix-all-mtl: fetched sub-unit details', { migrationId: id, fetched: subUnitDetails.length });
+
+    // Build set of valid dest parent mtlIds for the "already correct" check
+    const validMtlIds = new Set(Object.values(parentMap).map(p => p.mtlId));
+
+    // Group sub-units by their current mtl.p value
+    // wrongMtlPGroups: mtlPValue → [{ _id, title }]
+    const wrongMtlPGroups = {};
+    let alreadyCorrect = 0;
+    for (const sub of subUnitDetails) {
+      const currentMtlP = sub.mtl?.p ?? null;
+      if (currentMtlP && validMtlIds.has(currentMtlP)) {
+        alreadyCorrect++;
+      } else {
+        const key = currentMtlP || '__null__';
+        if (!wrongMtlPGroups[key]) wrongMtlPGroups[key] = [];
+        wrongMtlPGroups[key].push({ _id: sub._id, title: sub.title || sub.nickname });
+      }
+    }
+
+    logger.info('scan-and-fix-all-mtl: wrong-mtlP groups found', {
+      migrationId: id, alreadyCorrect,
+      groups: Object.entries(wrongMtlPGroups).map(([k, v]) => ({ mtlP: k, count: v.length })),
+    });
+
+    // Match each wrong group to a dest parent using COUNT.
+    // Each parent has a unique expected sub-unit count derived from mtl.c length
+    // (source-world count) — even if mtl.c contains wrong IDs, the count is accurate.
+    const parentListings = allListings.filter(l => l.type === 'MTL' && parentMap[l._id]);
+    const parentCountMap = {}; // expectedCount → destParentId (only unambiguous matches)
+    const countToParents = {};
+    for (const p of parentListings) {
+      const count = Array.isArray(p.mtl?.c) ? p.mtl.c.length : 0;
+      if (!countToParents[count]) countToParents[count] = [];
+      countToParents[count].push(p._id);
+    }
+    for (const [count, ids] of Object.entries(countToParents)) {
+      if (ids.length === 1) parentCountMap[Number(count)] = ids[0];
+    }
+
+    const groups = {}; // destParentListingId → { parent, wrongSubUnits }
+    const orphaned = []; // groups that couldn't be matched
+
+    for (const [wrongMtlP, subUnits] of Object.entries(wrongMtlPGroups)) {
+      const count = subUnits.length;
+      const destParentId = parentCountMap[count];
+      if (!destParentId) {
+        logger.warn('scan-and-fix-all-mtl: could not match group to parent by count', {
+          migrationId: id, wrongMtlP, count,
+        });
+        orphaned.push({ wrongMtlP, count, subUnitIds: subUnits.map(s => s._id), sampleTitles: subUnits.slice(0, 3).map(s => s.title) });
+        continue;
+      }
+      const parentInfo = parentMap[destParentId];
+      groups[destParentId] = {
+        parent: { ...parentInfo, destParentId },
+        wrongMtlP,
+        wrongSubUnits: subUnits,
+      };
+      logger.info('scan-and-fix-all-mtl: matched group to parent', {
+        migrationId: id, wrongMtlP, count, destParentId, parentTitle: parentInfo.title,
+      });
+    }
+
+    const report = {
+      totalListings: allListings.length,
+      mtlParents: Object.keys(parentMap).length,
+      alreadyCorrect,
+      orphanedCount: orphaned.reduce((s, o) => s + o.count, 0),
+      orphaned,
+      groupsNeedingFix: Object.keys(groups).length,
+      groups: Object.entries(groups).map(([destParentId, g]) => ({
+        destParentId,
+        parentTitle: g.parent.title,
+        destParentMtlId: g.parent.mtlId,
+        subUnitsToFix: g.wrongSubUnits.length,
+        subUnitIds: g.wrongSubUnits.map(s => s._id),
+        sampleTitles: g.wrongSubUnits.slice(0, 5).map(s => s.title),
+        currentMtlPValue: g.wrongMtlP,
+      })),
+    };
+
+    res.status(202).json({ message: 'scan-and-fix-all-mtl started', dryRun, report });
+
+    if (dryRun) {
+      logger.info('scan-and-fix-all-mtl: dry-run complete', { migrationId: id, report });
+      return;
+    }
+
+    // Step 4: for each group, recreate the bad sub-units with correct mtl.p
+    const idMap = { ...(row.results?.listings?.idMap || {}) };
+    const reversedIdMap = Object.fromEntries(Object.entries(idMap).map(([s, d]) => [d, s]));
+    const idMapUpdates = {};
+
+    for (const [destParentId, g] of Object.entries(groups)) {
+      const { mtlId: destParentMtlId, title: parentTitle } = g.parent;
+      logger.info('scan-and-fix-all-mtl: fixing parent group', {
+        migrationId: id, destParentId, destParentMtlId, parentTitle, count: g.wrongSubUnits.length,
+      });
+
+      let ok = 0; let failed = 0;
+      for (const { _id: oldDestId } of g.wrongSubUnits) {
+        try {
+          const fullListing = await destClient.getListingById(oldDestId);
+          if (!fullListing) throw new Error('Could not fetch listing ' + oldDestId);
+
+          const payload = cleanForRecreate(fullListing);
+          payload.parentId = destParentId;
+          payload.type = 'MTL_CHILD';
+          payload.mtl = { p: destParentMtlId };
+
+          await destClient.request('DELETE', `/listings/${oldDestId}`);
+          logger.info('scan-and-fix-all-mtl: deleted', { migrationId: id, oldDestId });
+
+          const created = await destClient.request('POST', '/listings', payload);
+          const newDestId = created?._id;
+          if (!newDestId) throw new Error('No _id returned from POST for ' + oldDestId);
+
+          logger.info('scan-and-fix-all-mtl: recreated', { migrationId: id, oldDestId, newDestId, destParentMtlId });
+
+          const srcId = reversedIdMap[oldDestId];
+          if (srcId) idMapUpdates[srcId] = newDestId;
+          ok++;
+        } catch (err) {
+          logger.error('scan-and-fix-all-mtl: failed for sub-unit', { migrationId: id, oldDestId, error: err.message });
+          failed++;
+        }
+      }
+      logger.info('scan-and-fix-all-mtl: group complete', { migrationId: id, parentTitle, ok, failed });
+    }
+
+    // Step 5: persist any idMap updates (best-effort)
+    if (Object.keys(idMapUpdates).length > 0) {
+      const current = await pool.query(`SELECT results FROM migrations WHERE id = $1`, [id]);
+      const results = current.rows[0]?.results || {};
+      const newIdMap = { ...(results.listings?.idMap || {}), ...idMapUpdates };
+      const updatedResults = { ...results, listings: { ...results.listings, idMap: newIdMap } };
+      await pool.query(`UPDATE migrations SET results = $1 WHERE id = $2`, [JSON.stringify(updatedResults), id]);
+      logger.info('scan-and-fix-all-mtl: idMap updated', { migrationId: id, updated: Object.keys(idMapUpdates).length });
+    }
+
+    logger.info('scan-and-fix-all-mtl: all groups complete', { migrationId: id, totalIdMapUpdates: Object.keys(idMapUpdates).length });
+  } catch (err) {
+    logger.error('scan-and-fix-all-mtl error', { error: err.message });
+  }
+});
+
+// ── POST /api/admin/migrations/:id/manual-assign-mtl-subunits ────────────────
+// Manually re-parent orphaned MTL_CHILD sub-units whose correct parent cannot
+// be determined automatically.
+//
+// Body: {
+//   assignments: [
+//     { destSubUnitId: "<dest listing id>", destParentListingId: "<dest parent listing id>" },
+//     ...
+//   ],
+//   dryRun: false   // optional; default false
+// }
+//
+// For each assignment the endpoint will:
+//   1. Fetch the current dest sub-unit's full data
+//   2. Verify the given destParentListingId is an MTL parent in the dest account
+//   3. (if not dryRun) Delete the old sub-unit and recreate it with correct parentId + mtl.p
+//
+// Returns: { ok, failed, skipped, results: [...] }
+
+router.post('/migrations/:id/manual-assign-mtl-subunits', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { assignments = [], dryRun = false } = req.body;
+
+    if (!Array.isArray(assignments) || assignments.length === 0) {
+      return res.status(400).json({ error: 'assignments must be a non-empty array' });
+    }
+
+    const migResult = await pool.query(
+      `SELECT dest_client_id, dest_client_secret, results FROM migrations WHERE id = $1`,
+      [id]
+    );
+    if (migResult.rowCount === 0) return res.status(404).json({ error: 'Migration not found' });
+    const row = migResult.rows[0];
+
+    const destClient = new GuestyClient({
+      clientId: decrypt(row.dest_client_id),
+      clientSecret: decrypt(row.dest_client_secret),
+    });
+
+    // Fetch all dest listings to build parent map (listingId → mtlId)
+    logger.info('manual-assign-mtl-subunits: fetching all destination listings', { migrationId: id });
+    const allListings = await destClient.getAllListings();
+    const parentMap = {};
+    for (const l of allListings) {
+      if (l.type === 'MTL' && l.mtl?._id) {
+        parentMap[l._id] = { mtlId: l.mtl._id, title: l.title || l.nickname || l._id };
+      }
+    }
+    logger.info('manual-assign-mtl-subunits: dest parents found', { migrationId: id, count: Object.keys(parentMap).length });
+
+    res.status(202).json({ message: 'manual-assign-mtl-subunits started', dryRun, total: assignments.length });
+
+    const idMap = { ...(row.results?.listings?.idMap || {}) };
+    const reversedIdMap = Object.fromEntries(Object.entries(idMap).map(([s, d]) => [d, s]));
+    const idMapUpdates = {};
+
+    const results = [];
+    let ok = 0; let failed = 0; let skipped = 0;
+
+    for (const { destSubUnitId, destParentListingId } of assignments) {
+      const parentInfo = parentMap[destParentListingId];
+      if (!parentInfo) {
+        logger.warn('manual-assign-mtl-subunits: unknown parent listing id', { migrationId: id, destParentListingId, destSubUnitId });
+        results.push({ destSubUnitId, destParentListingId, status: 'skipped', reason: 'parent not found in dest account' });
+        skipped++;
+        continue;
+      }
+      const { mtlId: destParentMtlId, title: parentTitle } = parentInfo;
+
+      if (dryRun) {
+        logger.info('manual-assign-mtl-subunits: dry-run assignment', { migrationId: id, destSubUnitId, destParentListingId, destParentMtlId, parentTitle });
+        results.push({ destSubUnitId, destParentListingId, destParentMtlId, parentTitle, status: 'dry-run' });
+        skipped++;
+        continue;
+      }
+
+      try {
+        const fullListing = await destClient.getListingById(destSubUnitId);
+        if (!fullListing) throw new Error('Could not fetch listing ' + destSubUnitId);
+
+        const READ_ONLY_FIELDS = new Set([
+          '_id', 'id', 'accountId', 'createdAt', 'updatedAt', 'lastActivityAt',
+          'importedAt', 'integrations', 'isListed', 'listed', 'listingRooms',
+          'calendarRules', 'customFields', 'amenitiesNotIncluded',
+          'activeReservationCount', 'sales', 'commissionFormula',
+          'netIncomeFormula', 'ownerRevenueFormula',
+        ]);
+
+        function stripIds(obj) {
+          if (Array.isArray(obj)) return obj.map(stripIds);
+          if (obj && typeof obj === 'object') {
+            const out = {};
+            for (const [k, v] of Object.entries(obj)) {
+              if (k === '_id' || k === 'id') continue;
+              out[k] = stripIds(v);
+            }
+            return out;
+          }
+          return obj;
+        }
+
+        const payload = {};
+        for (const [k, v] of Object.entries(fullListing)) {
+          if (!READ_ONLY_FIELDS.has(k)) payload[k] = stripIds(v);
+        }
+        payload.parentId = destParentListingId;
+        payload.type = 'MTL_CHILD';
+        payload.mtl = { p: destParentMtlId };
+
+        await destClient.request('DELETE', `/listings/${destSubUnitId}`);
+        logger.info('manual-assign-mtl-subunits: deleted old sub-unit', { migrationId: id, destSubUnitId, destParentListingId, destParentMtlId });
+
+        const created = await destClient.request('POST', '/listings', payload);
+        const newDestId = created?._id;
+        if (!newDestId) throw new Error('No _id returned from POST for ' + destSubUnitId);
+
+        logger.info('manual-assign-mtl-subunits: recreated sub-unit', { migrationId: id, oldId: destSubUnitId, newId: newDestId, destParentMtlId, parentTitle });
+
+        const srcId = reversedIdMap[destSubUnitId];
+        if (srcId) idMapUpdates[srcId] = newDestId;
+
+        results.push({ destSubUnitId, newDestId, destParentListingId, destParentMtlId, parentTitle, status: 'ok' });
+        ok++;
+      } catch (err) {
+        logger.error('manual-assign-mtl-subunits: failed', { migrationId: id, destSubUnitId, error: err.message });
+        results.push({ destSubUnitId, destParentListingId, status: 'failed', error: err.message });
+        failed++;
+      }
+    }
+
+    if (Object.keys(idMapUpdates).length > 0) {
+      const current = await pool.query(`SELECT results FROM migrations WHERE id = $1`, [id]);
+      const existingResults = current.rows[0]?.results || {};
+      const newIdMap = { ...(existingResults.listings?.idMap || {}), ...idMapUpdates };
+      const updatedResults = { ...existingResults, listings: { ...existingResults.listings, idMap: newIdMap } };
+      await pool.query(`UPDATE migrations SET results = $1 WHERE id = $2`, [JSON.stringify(updatedResults), id]);
+      logger.info('manual-assign-mtl-subunits: idMap updated', { migrationId: id, updated: Object.keys(idMapUpdates).length });
+    }
+
+    logger.info('manual-assign-mtl-subunits: complete', { migrationId: id, ok, failed, skipped, total: assignments.length });
+  } catch (err) {
+    logger.error('manual-assign-mtl-subunits error', { error: err.message, stack: err.stack });
   }
 });
 
