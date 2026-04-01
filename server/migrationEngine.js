@@ -982,6 +982,11 @@ async function runMigration(migrationId) {
       const idMap = (partialStoredMap && typeof partialStoredMap === 'object')
         ? { ...partialStoredMap }
         : {};
+      // destParentMtlIds: dest listing _id → dest listing mtl._id for MTL parents.
+      // Populated as parents are created; used to wire mtl.p on sub-units at
+      // creation time (the only time Guesty allows it — PUT /listings silently
+      // ignores mtl field changes post-creation).
+      const destParentMtlIds = {};
       if (Object.keys(idMap).length > 0) {
         log.info(`${category}: resuming with ${Object.keys(idMap).length} already-created item(s) from partial run`);
       }
@@ -1042,6 +1047,18 @@ async function runMigration(migrationId) {
             transformed = stripFieldsDeep(item);
           }
 
+          // For MTL sub-units: inject mtl.p at creation time using the destination
+          // parent's mtl._id.  Guesty wires the parent-child relationship from mtl.p
+          // during POST; the field is read-only after creation (PUT silently ignores it).
+          if (category === 'listings' && item.parentId) {
+            const destParentId = idMaps.listings?.[item.parentId];
+            const destParentMtlId = destParentId && destParentMtlIds[destParentId];
+            if (destParentMtlId) {
+              transformed = { ...transformed, mtl: { p: destParentMtlId } };
+              log.debug(`listings: injecting mtl.p for sub-unit`, { sourceId, destParentMtlId });
+            }
+          }
+
           const created = await categoryDef.create(destClient, transformed);
           const newId = created._id || created.id;
           if (sourceId && newId) {
@@ -1051,6 +1068,12 @@ async function runMigration(migrationId) {
 
           // Photo handling for listings
           if (category === 'listings') {
+            // After creating an MTL parent, capture its mtl._id so we can wire
+            // mtl.p correctly on sub-units that will be created later in this loop.
+            if (created.type === 'MTL' && created.mtl?._id && newId) {
+              destParentMtlIds[newId] = created.mtl._id;
+              log.info(`listings: captured mtl._id for parent`, { destParentId: newId, mtlId: created.mtl._id });
+            }
             // Guesty's Open API v1 has no working separate photo upload endpoint.
             // Photos are included directly in the POST /listings create body
             // (via the pictures[] array) — Guesty handles them at creation time.
@@ -1191,78 +1214,12 @@ async function runMigration(migrationId) {
       }
 
       // ── Post-processing: remap subListingsIds on MTL parent listings ────────
-      // subListingsIds is stripped from SOURCE_ONLY_FIELDS during creation to
-      // prevent the destination parent from holding source-account sub-unit IDs.
-      // Now that all sub-units are in idMap, we can PATCH each parent listing
-      // with the correctly remapped destination sub-unit IDs.
-      // This is what makes Guesty's "Details and Layout" show units as assigned.
-      if (category === 'listings') {
-        // Re-wire mtl.c on parents (children list) and mtl.p on sub-units (parent ref).
-        // The mtl field is stripped during creation (SOURCE_ONLY_FIELDS) so Guesty
-        // initialises it blank; we must patch it with remapped destination IDs.
-        const rawArr = Array.isArray(rawItems) ? rawItems : [];
-        // Use parentId (not mtl.p) to determine parent-child relationship.
-        // mtl.p can reference intermediate entity IDs that are not in the idMap,
-        // while parentId is the authoritative listing-level parent reference.
-        const mtlChildrenSrc = rawArr.filter(l => l.parentId && idMap[l.parentId]);
-
-        // Build per-source-parent → list of dest child IDs
-        const parentToDestChildren = new Map();
-        for (const srcChild of mtlChildrenSrc) {
-          const srcChildId = srcChild._id || srcChild.id;
-          const destChildId = idMap[srcChildId];
-          const destParentId = idMap[srcChild.parentId];
-          if (!destChildId || !destParentId) continue;
-          if (!parentToDestChildren.has(srcChild.parentId)) parentToDestChildren.set(srcChild.parentId, []);
-          parentToDestChildren.get(srcChild.parentId).push(destChildId);
-        }
-
-        if (parentToDestChildren.size > 0 || mtlChildrenSrc.length > 0) {
-          log.info(`listings: remapping mtl for ${parentToDestChildren.size} parent(s) and ${mtlChildrenSrc.length} child(ren)`);
-
-          // Patch parents: update mtl.c with correct destination sub-unit IDs
-          await Promise.allSettled(
-            Array.from(parentToDestChildren.entries()).map(async ([srcParentId, destSubIds]) => {
-              const destParentId = idMap[srcParentId];
-              if (!destParentId) return;
-              try {
-                const destParent = await destClient.getListingById(destParentId);
-                if (!destParent?.mtl) return;
-                await destClient.updateListing(destParentId, { mtl: { ...destParent.mtl, c: destSubIds } });
-                log.info(`listings: mtl.c remapped`, { destParentId, count: destSubIds.length });
-              } catch (err) {
-                log.warn(`listings: mtl.c PATCH failed`, {
-                  destParentId,
-                  status: err.response?.status,
-                  error: err.response?.data?.message || err.message,
-                });
-              }
-            })
-          );
-
-          // Patch sub-units: update mtl.p with destination parent ID, clear mtl.c
-          await Promise.allSettled(
-            mtlChildrenSrc.map(async (srcChild) => {
-              const srcChildId = srcChild._id || srcChild.id;
-              const destChildId = idMap[srcChildId];
-              const destParentId = idMap[srcChild.parentId];
-              if (!destChildId || !destParentId) return;
-              try {
-                const destChild = await destClient.getListingById(destChildId);
-                if (!destChild?.mtl) return;
-                await destClient.updateListing(destChildId, { mtl: { ...destChild.mtl, p: destParentId, c: [] } });
-                log.info(`listings: mtl.p remapped`, { destChildId, destParentId });
-              } catch (err) {
-                log.warn(`listings: mtl.p PATCH failed`, {
-                  destChildId,
-                  status: err.response?.status,
-                  error: err.response?.data?.message || err.message,
-                });
-              }
-            })
-          );
-        }
-      }
+      // NOTE: mtl.c (parent's children list) and mtl.p (sub-unit's parent ref) are
+      // READ-ONLY via Guesty's Open API — PUT /listings silently accepts but ignores
+      // changes to the mtl field.  The correct wiring is done AT CREATION TIME:
+      //   • destParentMtlIds is populated when each parent is created (above)
+      //   • Each sub-unit's POST body includes { mtl: { p: destParentMtlId } }
+      // No post-creation PATCH is needed or possible for mtl.
 
       idMaps[category] = idMap;
       results[category] = {
