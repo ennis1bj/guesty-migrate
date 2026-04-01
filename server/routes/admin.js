@@ -476,30 +476,61 @@ router.post('/migrations/:id/fix-mtl-relationships', async (req, res) => {
 
     if (parents.length === 0) { log.warn('No MTL parent listings found — aborting'); return; }
 
-    // Step 2: for each sub-unit fetch its SOURCE listing to get the correct parentId,
-    // then map that source parentId → destination parentId via idMap.
-    log.info(`Fetching ${subUnits.length} source sub-unit listings to resolve parentId`);
+    // Step 2: for each dest parent query its sub-units via parentId filter
+    // (primary strategy — no source access needed).
+    // We sent parentId=destParentId when creating each sub-unit; Guesty stores this
+    // internally even though it is not returned in GET /listings/:id responses.
+    log.info(`Querying dest account for sub-units of each of ${parents.length} parent(s)`);
     const subUnitParentMap = new Map(); // destSubId → destParentId
+    const destSubUnitIds = new Set(subUnits.map(s => s.destId));
+
     await Promise.allSettled(
-      subUnits.map(async sub => {
-        if (!sub.srcId || !sourceClient) return;
+      parents.map(async parent => {
         try {
-          const srcListing = await sourceClient.getListingById(sub.srcId);
-          const srcParentId = srcListing?.parentId;
-          if (!srcParentId) return;
-          const destParentId = idMap[srcParentId];
-          if (destParentId) {
-            subUnitParentMap.set(sub.destId, destParentId);
-          } else {
-            // parentId not in idMap — fall back to matching by type MTL if only one parent
-            if (parents.length === 1) subUnitParentMap.set(sub.destId, parents[0].destId);
+          const children = await destClient.getSubUnitsByListingId(parent.destId);
+          let matched = 0;
+          for (const child of children) {
+            const childId = child._id;
+            // Only map sub-units that are actually in our idMap (this migration)
+            if (childId && destSubUnitIds.has(childId)) {
+              subUnitParentMap.set(childId, parent.destId);
+              matched++;
+            }
           }
+          log.info(`Parent ${parent.destId}: found ${children.length} sub-unit(s) in dest, matched ${matched} to idMap`);
         } catch (err) {
-          log.warn(`Could not fetch source listing for sub-unit`, { srcId: sub.srcId, error: err.message });
-          if (parents.length === 1) subUnitParentMap.set(sub.destId, parents[0].destId);
+          log.warn(`getSubUnitsByListingId failed for parent ${parent.destId}`, { error: err.message });
         }
       })
     );
+
+    // Fallback: if dest query found nothing and source client is available, try source
+    const unresolved = subUnits.filter(s => !subUnitParentMap.has(s.destId));
+    if (unresolved.length > 0 && sourceClient) {
+      log.info(`${unresolved.length} sub-units unresolved from dest query — trying source account`);
+      await Promise.allSettled(
+        unresolved.map(async sub => {
+          if (!sub.srcId) return;
+          try {
+            const srcListing = await sourceClient.getListingById(sub.srcId);
+            const srcParentId = srcListing?.parentId;
+            if (!srcParentId) return;
+            const destParentId = idMap[srcParentId];
+            if (destParentId) subUnitParentMap.set(sub.destId, destParentId);
+          } catch (err) {
+            log.warn(`Source fetch failed for sub-unit`, { srcId: sub.srcId, error: err.message });
+          }
+        })
+      );
+    }
+
+    // Last-resort: if still unresolved and only one parent, assign all to it
+    const stillUnresolved = subUnits.filter(s => !subUnitParentMap.has(s.destId));
+    if (stillUnresolved.length > 0 && parents.length === 1) {
+      for (const sub of stillUnresolved) subUnitParentMap.set(sub.destId, parents[0].destId);
+      log.info(`Assigned ${stillUnresolved.length} unresolved sub-unit(s) to sole parent`);
+    }
+
     log.info(`Resolved parentId for ${subUnitParentMap.size}/${subUnits.length} sub-units`);
 
     // Step 3: build per-parent child lists
