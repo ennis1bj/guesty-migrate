@@ -375,9 +375,10 @@ router.get('/migrations/:id/diagnose-listings', async (req, res) => {
           listingType: l?.listingType,
           parentId: l?.parentId,
           complexId: l?.complexId,
-          // also check alternate field names Guesty may use
           parentListingId: l?.parentListingId,
           mtlParentId: l?.mtlParentId,
+          mtl: l?.mtl,
+          picturesManagedFromParent: l?.picturesManagedFromParent,
           title: l?.title,
         };
       })
@@ -398,6 +399,7 @@ router.get('/migrations/:id/diagnose-listings', async (req, res) => {
         complexId: parent.complexId,
         subListingsIds: parent.subListingsIds,
         subListingsIdsCount: Array.isArray(parent.subListingsIds) ? parent.subListingsIds.length : null,
+        mtl: parent.mtl,
         title: parent.title,
       } : null,
       subUnitSamples: subSamples.map(r =>
