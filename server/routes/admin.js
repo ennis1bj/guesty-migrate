@@ -421,7 +421,7 @@ router.post('/migrations/:id/fix-mtl-relationships', async (req, res) => {
   try {
     const { id } = req.params;
     const migResult = await pool.query(
-      `SELECT dest_client_id, dest_client_secret, results FROM migrations WHERE id = $1`,
+      `SELECT source_client_id, source_client_secret, dest_client_id, dest_client_secret, results FROM migrations WHERE id = $1`,
       [id]
     );
     if (migResult.rowCount === 0) return res.status(404).json({ error: 'Not found' });
@@ -441,74 +441,107 @@ router.post('/migrations/:id/fix-mtl-relationships', async (req, res) => {
       clientSecret: decrypt(row.dest_client_secret),
     });
 
-    // Step 1: classify each destination listing as parent or sub-unit by type
+    // Build reverse map: destId → srcId
+    const reversedIdMap = Object.fromEntries(Object.entries(idMap).map(([k, v]) => [v, k]));
+
+    // Source client — needed to read parentId from source listings
+    // May be null if credentials were cleared post-migration; handled in step 2 fallback.
+    let sourceClient = null;
+    if (row.source_client_id && row.source_client_secret) {
+      try {
+        sourceClient = new GuestyClient({
+          clientId: decrypt(row.source_client_id),
+          clientSecret: decrypt(row.source_client_secret),
+        });
+      } catch (e) {
+        log.warn('Could not initialise source client', { error: e.message });
+      }
+    }
+
+    // Step 1: classify destination listings by type
     const destIds = Object.values(idMap);
     log.info(`Fetching ${destIds.length} destination listings to classify`);
 
     const listings = (await Promise.allSettled(
       destIds.map(async destId => {
         const l = await destClient.getListingById(destId);
-        return l ? { destId, type: l.type, mtl: l.mtl } : null;
+        return l ? { destId, srcId: reversedIdMap[destId], type: l.type, mtl: l.mtl } : null;
       })
     )).flatMap(r => (r.status === 'fulfilled' && r.value ? [r.value] : []));
 
-    // Classify strictly by type field — never use mtl.c presence (sub-units have mtl.c:[])
     const parents  = listings.filter(l => l.type === 'MTL');
     const subUnits = listings.filter(l => l.type === 'MTL_CHILD');
-
-    // Log type distribution for diagnostics
     const typeCounts = listings.reduce((acc, l) => { acc[l.type || 'unknown'] = (acc[l.type || 'unknown'] || 0) + 1; return acc; }, {});
     log.info(`Classified: ${parents.length} parent(s), ${subUnits.length} sub-unit(s)`, { typeCounts });
 
-    if (parents.length === 0) {
-      log.warn('No MTL parent listings found — aborting');
-      return;
+    if (parents.length === 0) { log.warn('No MTL parent listings found — aborting'); return; }
+
+    // Step 2: for each sub-unit fetch its SOURCE listing to get the correct parentId,
+    // then map that source parentId → destination parentId via idMap.
+    log.info(`Fetching ${subUnits.length} source sub-unit listings to resolve parentId`);
+    const subUnitParentMap = new Map(); // destSubId → destParentId
+    await Promise.allSettled(
+      subUnits.map(async sub => {
+        if (!sub.srcId || !sourceClient) return;
+        try {
+          const srcListing = await sourceClient.getListingById(sub.srcId);
+          const srcParentId = srcListing?.parentId;
+          if (!srcParentId) return;
+          const destParentId = idMap[srcParentId];
+          if (destParentId) {
+            subUnitParentMap.set(sub.destId, destParentId);
+          } else {
+            // parentId not in idMap — fall back to matching by type MTL if only one parent
+            if (parents.length === 1) subUnitParentMap.set(sub.destId, parents[0].destId);
+          }
+        } catch (err) {
+          log.warn(`Could not fetch source listing for sub-unit`, { srcId: sub.srcId, error: err.message });
+          if (parents.length === 1) subUnitParentMap.set(sub.destId, parents[0].destId);
+        }
+      })
+    );
+    log.info(`Resolved parentId for ${subUnitParentMap.size}/${subUnits.length} sub-units`);
+
+    // Step 3: build per-parent child lists
+    const parentChildMap = new Map(parents.map(p => [p.destId, []]));
+    for (const [destSubId, destParentId] of subUnitParentMap) {
+      if (parentChildMap.has(destParentId)) parentChildMap.get(destParentId).push(destSubId);
     }
 
+    // Step 4: patch each parent's mtl.c
     const results = { parents: [], subUnits: {} };
-    const subUnitDestIds = subUnits.map(s => s.destId);
-
-    // Step 2: for each parent, set mtl.c = all destination sub-unit IDs
     for (const parent of parents) {
+      const childIds = parentChildMap.get(parent.destId) || [];
       if (!parent.mtl) {
-        log.warn(`Parent ${parent.destId} has no mtl object — skipping`);
         results.parents.push({ destId: parent.destId, status: 'skipped_no_mtl' });
         continue;
       }
       try {
-        const updatedMtl = { ...parent.mtl, c: subUnitDestIds };
-        await destClient.updateListing(parent.destId, { mtl: updatedMtl });
-        log.info(`mtl.c patched on parent`, { destId: parent.destId, childCount: subUnitDestIds.length });
-        results.parents.push({ destId: parent.destId, status: 'ok', childCount: subUnitDestIds.length });
+        await destClient.updateListing(parent.destId, { mtl: { ...parent.mtl, c: childIds } });
+        log.info(`mtl.c patched on parent`, { destId: parent.destId, childCount: childIds.length });
+        results.parents.push({ destId: parent.destId, status: 'ok', childCount: childIds.length });
       } catch (err) {
-        log.warn(`mtl.c PATCH failed for parent ${parent.destId}`, { error: err.message, status: err.response?.status });
+        log.warn(`mtl.c PATCH failed for parent`, { destId: parent.destId, error: err.message });
         results.parents.push({ destId: parent.destId, status: 'error', error: err.message });
       }
     }
 
-    // Step 3: for each sub-unit, set mtl.p = destination parent ID and clear mtl.c to []
-    // (Previous bad run may have set mtl.c on sub-units; reset it here)
-    const destParentId = parents[0]?.destId;
-    log.info(`Patching ${subUnits.length} sub-unit(s) mtl.p → ${destParentId}`);
+    // Step 5: patch each sub-unit's mtl.p (and reset mtl.c to [] to undo any previous bad run)
     let ok = 0; let failed = 0;
     for (const sub of subUnits) {
-      if (!sub.mtl) {
-        log.warn(`Sub-unit ${sub.destId} has no mtl — skipping`);
-        failed++;
-        continue;
-      }
+      const destParentId = subUnitParentMap.get(sub.destId);
+      if (!destParentId) { log.warn(`No destParentId for sub-unit ${sub.destId} — skipping`); failed++; continue; }
+      if (!sub.mtl) { log.warn(`Sub-unit ${sub.destId} has no mtl — skipping`); failed++; continue; }
       try {
-        // Explicitly set p to dest parent and reset c to [] in case it was wrongly populated
-        const updatedMtl = { ...sub.mtl, p: destParentId, c: [] };
-        await destClient.updateListing(sub.destId, { mtl: updatedMtl });
+        await destClient.updateListing(sub.destId, { mtl: { ...sub.mtl, p: destParentId, c: [] } });
         ok++;
       } catch (err) {
-        log.warn(`mtl.p PATCH failed for sub-unit ${sub.destId}`, { error: err.message, status: err.response?.status });
+        log.warn(`mtl.p PATCH failed for sub-unit ${sub.destId}`, { error: err.message });
         failed++;
       }
     }
-    log.info(`Sub-unit mtl.p patch complete`, { ok, failed, destParentId });
-    results.subUnits = { ok, failed, destParentId };
+    log.info(`Sub-unit mtl.p patch complete`, { ok, failed });
+    results.subUnits = { ok, failed };
 
     log.info('fix-mtl-relationships complete', results);
   } catch (err) {

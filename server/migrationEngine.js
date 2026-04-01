@@ -1201,20 +1201,30 @@ async function runMigration(migrationId) {
         // The mtl field is stripped during creation (SOURCE_ONLY_FIELDS) so Guesty
         // initialises it blank; we must patch it with remapped destination IDs.
         const rawArr = Array.isArray(rawItems) ? rawItems : [];
-        const mtlParentsSrc = rawArr.filter(l => l.mtl && Array.isArray(l.mtl.c) && l.mtl.c.length > 0);
-        const mtlChildrenSrc = rawArr.filter(l => l.mtl && l.mtl.p && idMap[l.mtl.p]);
+        // Use parentId (not mtl.p) to determine parent-child relationship.
+        // mtl.p can reference intermediate entity IDs that are not in the idMap,
+        // while parentId is the authoritative listing-level parent reference.
+        const mtlChildrenSrc = rawArr.filter(l => l.parentId && idMap[l.parentId]);
 
-        if (mtlParentsSrc.length > 0 || mtlChildrenSrc.length > 0) {
-          log.info(`listings: remapping mtl for ${mtlParentsSrc.length} parent(s) and ${mtlChildrenSrc.length} child(ren)`);
+        // Build per-source-parent → list of dest child IDs
+        const parentToDestChildren = new Map();
+        for (const srcChild of mtlChildrenSrc) {
+          const srcChildId = srcChild._id || srcChild.id;
+          const destChildId = idMap[srcChildId];
+          const destParentId = idMap[srcChild.parentId];
+          if (!destChildId || !destParentId) continue;
+          if (!parentToDestChildren.has(srcChild.parentId)) parentToDestChildren.set(srcChild.parentId, []);
+          parentToDestChildren.get(srcChild.parentId).push(destChildId);
+        }
 
-          // Patch parents: update mtl.c with destination sub-unit IDs
+        if (parentToDestChildren.size > 0 || mtlChildrenSrc.length > 0) {
+          log.info(`listings: remapping mtl for ${parentToDestChildren.size} parent(s) and ${mtlChildrenSrc.length} child(ren)`);
+
+          // Patch parents: update mtl.c with correct destination sub-unit IDs
           await Promise.allSettled(
-            mtlParentsSrc.map(async (srcParent) => {
-              const srcParentId = srcParent._id || srcParent.id;
+            Array.from(parentToDestChildren.entries()).map(async ([srcParentId, destSubIds]) => {
               const destParentId = idMap[srcParentId];
               if (!destParentId) return;
-              const destSubIds = srcParent.mtl.c.map(sid => idMap[sid]).filter(Boolean);
-              if (destSubIds.length === 0) return;
               try {
                 const destParent = await destClient.getListingById(destParentId);
                 if (!destParent?.mtl) return;
@@ -1230,18 +1240,17 @@ async function runMigration(migrationId) {
             })
           );
 
-          // Patch sub-units: update mtl.p with destination parent ID
+          // Patch sub-units: update mtl.p with destination parent ID, clear mtl.c
           await Promise.allSettled(
             mtlChildrenSrc.map(async (srcChild) => {
               const srcChildId = srcChild._id || srcChild.id;
               const destChildId = idMap[srcChildId];
-              if (!destChildId) return;
-              const destParentId = idMap[srcChild.mtl.p];
-              if (!destParentId) return;
+              const destParentId = idMap[srcChild.parentId];
+              if (!destChildId || !destParentId) return;
               try {
                 const destChild = await destClient.getListingById(destChildId);
                 if (!destChild?.mtl) return;
-                await destClient.updateListing(destChildId, { mtl: { ...destChild.mtl, p: destParentId } });
+                await destClient.updateListing(destChildId, { mtl: { ...destChild.mtl, p: destParentId, c: [] } });
                 log.info(`listings: mtl.p remapped`, { destChildId, destParentId });
               } catch (err) {
                 log.warn(`listings: mtl.p PATCH failed`, {
