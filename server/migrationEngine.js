@@ -1099,6 +1099,56 @@ async function runMigration(migrationId) {
         }
       }
 
+      // ── Parallel spaces + availability-settings migration (listings only) ───
+      // Guesty's dashboard crashes when these sub-resources are absent — the UI
+      // assumes at least one "space" and an availability-settings document exist
+      // for every listing.  Migrate them after the creation loop so every listing
+      // ID is in idMap, then apply to all entries.  Best-effort: errors are
+      // logged but never fail the overall listing migration.
+      if (category === 'listings') {
+        const subPairs = Object.entries(idMap); // [[srcId, destId], ...]
+        log.info(`listings: migrating spaces + availability-settings for ${subPairs.length} listing(s)`);
+        await Promise.allSettled(
+          subPairs.map(async ([srcId, destId]) => {
+            // ── Spaces ──────────────────────────────────────────────────────
+            try {
+              const spaces = await sourceClient.getListingSpaces(srcId);
+              if (Array.isArray(spaces) && spaces.length > 0) {
+                for (const space of spaces) {
+                  const cleanedSpace = stripFieldsDeep(space);
+                  try {
+                    await destClient.createListingSpace(destId, cleanedSpace);
+                  } catch (spErr) {
+                    // 409 = space already exists — treat as success
+                    if (spErr.response?.status !== 409) {
+                      log.warn(`listings: space create failed for dest ${destId}`, { error: spErr.response?.data?.message || spErr.message });
+                    }
+                  }
+                }
+              }
+            } catch (err) {
+              log.warn(`listings: failed to fetch spaces for source ${srcId}`, { error: err.message });
+            }
+
+            // ── Availability settings ────────────────────────────────────────
+            try {
+              const avail = await sourceClient.getListingAvailabilitySettings(srcId);
+              if (avail && typeof avail === 'object') {
+                const cleanedAvail = stripFieldsDeep(avail);
+                try {
+                  await destClient.updateListingAvailabilitySettings(destId, cleanedAvail);
+                } catch (avErr) {
+                  log.warn(`listings: availability-settings update failed for dest ${destId}`, { error: avErr.response?.data?.message || avErr.message });
+                }
+              }
+            } catch (err) {
+              log.warn(`listings: failed to fetch availability-settings for source ${srcId}`, { error: err.message });
+            }
+          })
+        );
+        log.info(`listings: spaces + availability-settings migration complete`);
+      }
+
       // ── Parallel calendar block migration (listings only) ─────────────────
       // Runs after the creation loop so every parent and sub-unit ID is in
       // idMap before we start.  Uses Promise.allSettled so one failure doesn't
@@ -1250,4 +1300,4 @@ async function runMigration(migrationId) {
   }
 }
 
-module.exports = { runMigration, extractPhotoUrl };
+module.exports = { runMigration, extractPhotoUrl, stripFieldsDeep };

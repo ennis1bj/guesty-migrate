@@ -1,0 +1,66 @@
+This usually happens when the listing exists at the API/data level but is missing required related entities or fields the UI expects (spaces, property type, address, owner account, etc.), so the web app errors out while rendering the listing page.[1][2]
+
+### Quick sanity checks
+
+Run these against one of the problematic listing IDs:
+
+1. Confirm the listing really exists  
+   - `GET /v1/listings/{id}` and verify you get a full JSON object, not a 404/500.[1]
+   - Compare its shape against a healthy listing you created manually in the UI.
+
+2. Check required related objects  
+   For that same `{id}`, call the key sub-resources Guesty expects to exist:[2]
+   - `GET /v1/listings/{id}/spaces` – at least one “space” (bedroom, entire place, etc.)  
+   - `GET /v1/listings/{id}/house-rules`  
+   - `GET /v1/listings/{id}/availability-settings`  
+   - If you are using complexes/multi-units, verify the complex and parent-child relationships.
+
+3. Validate minimal required fields  
+   In the listing payload, make sure at least:  
+   - `accountId` / owner mapping is valid.  
+   - `type` / property type is a supported value (entire place, private room, etc.).[3]
+   - Basic address object or localization fields are non-null if the UI assumes them.
+
+### Common causes when importing via API
+
+- You only called `POST /listings` and did **not** follow up with the recommended create calls (spaces, rules, availability, etc.), leaving the listing in a half-initialized state that the UI cannot render cleanly.[2]
+- A field contains an unexpected enum/string (e.g., property type or status), which the UI code does not guard against.  
+- The listing is in an internal status (“unlisted”, “archived”, or similar) that is not handled correctly in the front-end path you’re using.[4]
+- There is a front-end error (JS exception) caused by missing nested objects; you’ll see this in the browser devtools console.[5]
+
+### How to narrow it down fast
+
+- Open devtools → Network tab while loading the broken listing page.  
+  - See which API call returns 500/400 or empty data.  
+  - Inspect that response for an error message or missing field hints.[5][1]
+- In the Console tab, look for an exception like “Cannot read properties of undefined (…something…)”; that usually points directly to the missing nested object.
+
+### Minimal “safe” creation flow (for future imports)
+
+When you create a listing via Open API, follow Guesty’s recommended sequence for a minimal, UI-safe listing:[2]
+
+1. `POST /listings` – create the shell listing with valid type, account, address.  
+2. `POST /listings/{id}/spaces` – at least one primary space.  
+3. `PUT /listings/{id}/availability-settings` – basic availability window.[6]
+4. Optionally: house rules, booking policies, pricing, etc.
+
+If you paste a redacted example of your create-listing payload (and which endpoints you’re hitting after `POST /listings`), I can tell you exactly which piece is likely causing the UI to choke.  
+
+What endpoint sequence and payload are you currently using to create each listing?
+
+Sources
+[1] Quick start guide - Guesty Open API https://open-api-docs.guesty.com/docs/quick-start-guide
+[2] Create a Property - Guesty Open API https://open-api-docs.guesty.com/docs/create-a-property
+[3] Importing an Airbnb listing to Guesty https://help.guesty.com/hc/en-gb/articles/9358084353437-Importing-an-Airbnb-listing-to-Guesty
+[4] Troubleshooting: Unable to connect a listing to a booking channel https://help.guesty.com/hc/en-gb/articles/22251458788509-Troubleshooting-Unable-to-connect-a-listing-to-a-booking-channel
+[5] Troubleshooting browser issues - Guesty Help Center https://help.guesty.com/hc/en-gb/articles/13858372304925-Troubleshooting-browser-issues
+[6] Update listings availability settings - Guesty Open API https://open-api-docs.guesty.com/reference/put_listings-id-availability-settings
+[7] Why is my listing not displayed in the Booking Website? https://help-lite.guesty.com/hc/en-gb/articles/24924431212061-Why-is-my-listing-not-displayed-in-the-Booking-Website
+[8] How to Import Settings from an Existing Listing in Guesty Pro https://www.youtube.com/watch?v=TLkiEZSZl_k
+[9] Troubleshooting API Error Codes - Guesty Open API https://open-api-docs.guesty.com/docs/troubleshooting-api-error-codes
+[10] Existing message automations not triggered for a new listing https://help.guesty.com/hc/en-gb/articles/18648945484573-Troubleshooting-Existing-message-automations-not-triggered-for-a-new-listing
+[11] Importing an Airbnb listing to Guesty https://help-lite.guesty.com/hc/en-gb/articles/24940624929949-Importing-an-Airbnb-listing-to-Guesty
+[12] Troubleshooting: The Guesty Inbox is not loading https://help.guesty.com/hc/en-gb/articles/9390810569757-Troubleshooting-The-Guesty-Inbox-is-not-loading
+[13] Why Was My Vrbo Automated Message Not Sent? https://help.guestyforhosts.com/hc/en-gb/articles/9350804073117-Why-Was-My-Vrbo-Automated-Message-Not-Sent
+[14] Troubleshooting: Missing or failed Booking.com listings when linking https://help.guesty.com/hc/en-gb/articles/17284482150685-Troubleshooting-Missing-or-failed-Booking-com-listings-when-linking
+[15] Troubleshooting: Airbnb listing connection errors - Guesty Help Center https://help-lite.guesty.com/hc/en-gb/articles/25262291744925-Troubleshooting-Airbnb-listing-connection-errors

@@ -673,6 +673,41 @@ class GuestyClient {
     return this.request('PUT', `/listings/${listingId}/availability-settings`, settings);
   }
 
+  async getListingAvailabilitySettings(listingId) {
+    try {
+      return await this.request('GET', `/listings/${listingId}/availability-settings`);
+    } catch (err) {
+      if (err.response?.status === 404) return null;
+      throw err;
+    }
+  }
+
+  async getListingSpaces(listingId) {
+    try {
+      const data = await this.request('GET', `/listings/${listingId}/spaces`);
+      // Guesty may return an array directly or wrap it in a results/data key
+      if (Array.isArray(data)) return data;
+      if (data && Array.isArray(data.results)) return data.results;
+      if (data && Array.isArray(data.data)) return data.data;
+      if (data && typeof data === 'object') {
+        // Sometimes returns { spaces: [...] } or a single space object
+        const vals = Object.values(data);
+        const arr = vals.find(v => Array.isArray(v));
+        if (arr) return arr;
+        // Single space object
+        return [data];
+      }
+      return [];
+    } catch (err) {
+      if (err.response?.status === 404) return [];
+      throw err;
+    }
+  }
+
+  async createListingSpace(listingId, data) {
+    return this.request('POST', `/listings/${listingId}/spaces`, data);
+  }
+
   isChannelListing(listing) {
     return Array.isArray(listing.integrations) &&
            listing.integrations.some(i => i && (i.channelName || i.platform || i.channel));

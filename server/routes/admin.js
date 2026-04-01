@@ -2,6 +2,8 @@ const express = require('express');
 const { pool } = require('../db');
 const { authenticateToken, requireAdmin } = require('../auth');
 const { logger } = require('../logger');
+const { decrypt } = require('../encryption');
+const GuestyClient = require('../guestyClient');
 
 const router = express.Router();
 
@@ -332,6 +334,104 @@ router.post('/migrations/:id/retry', async (req, res) => {
   } catch (err) {
     logger.error('Admin retry migration error', { error: err.message });
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ── POST /api/admin/migrations/:id/fix-listing-subresources ──────────────────
+// Backfills spaces + availability-settings for listings already created in the
+// destination account.  Runs async in the background; returns immediately.
+// Use when listings were created without these sub-resources (causing Guesty
+// dashboard errors) and a full reprocess is not desired.
+
+router.post('/migrations/:id/fix-listing-subresources', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Fetch full migration row including encrypted credentials and stored idMap
+    const migResult = await pool.query(
+      `SELECT source_client_id, source_client_secret,
+              dest_client_id, dest_client_secret, results
+       FROM migrations WHERE id = $1`,
+      [id]
+    );
+    if (migResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Migration not found' });
+    }
+    const row = migResult.rows[0];
+    const idMap = row.results?.listings?.idMap || {};
+    const pairs = Object.entries(idMap);
+    if (pairs.length === 0) {
+      return res.status(400).json({ error: 'No listings idMap found in migration results' });
+    }
+
+    const sourceClient = new GuestyClient({
+      clientId: decrypt(row.source_client_id),
+      clientSecret: decrypt(row.source_client_secret),
+    });
+    const destClient = new GuestyClient({
+      clientId: decrypt(row.dest_client_id),
+      clientSecret: decrypt(row.dest_client_secret),
+    });
+
+    // Respond immediately — the fix runs async in the background
+    res.json({ ok: true, queued: true, listingCount: pairs.length });
+
+    // ── Background fix ─────────────────────────────────────────────────────
+    const { stripFieldsDeep } = require('../migrationEngine');
+    const log = logger.child({ migrationId: id, op: 'fix-listing-subresources' });
+    log.info(`Starting spaces + availability-settings backfill for ${pairs.length} listings`);
+
+    let spaceOk = 0, spaceSkip = 0, spaceFail = 0;
+    let availOk = 0, availFail = 0;
+
+    await Promise.allSettled(
+      pairs.map(async ([srcId, destId]) => {
+        // Spaces
+        try {
+          const spaces = await sourceClient.getListingSpaces(srcId);
+          if (Array.isArray(spaces) && spaces.length > 0) {
+            for (const space of spaces) {
+              const cleaned = stripFieldsDeep(space);
+              try {
+                await destClient.createListingSpace(destId, cleaned);
+                spaceOk++;
+              } catch (spErr) {
+                if (spErr.response?.status === 409) { spaceSkip++; }
+                else { spaceFail++; log.warn(`space create failed dest=${destId}`, { error: spErr.response?.data?.message || spErr.message }); }
+              }
+            }
+          } else {
+            spaceSkip++;
+          }
+        } catch (err) {
+          spaceFail++;
+          log.warn(`spaces fetch failed src=${srcId}`, { error: err.message });
+        }
+
+        // Availability settings
+        try {
+          const avail = await sourceClient.getListingAvailabilitySettings(srcId);
+          if (avail && typeof avail === 'object') {
+            const cleaned = stripFieldsDeep(avail);
+            try {
+              await destClient.updateListingAvailabilitySettings(destId, cleaned);
+              availOk++;
+            } catch (avErr) {
+              availFail++;
+              log.warn(`availability-settings update failed dest=${destId}`, { error: avErr.response?.data?.message || avErr.message });
+            }
+          }
+        } catch (err) {
+          availFail++;
+          log.warn(`availability-settings fetch failed src=${srcId}`, { error: err.message });
+        }
+      })
+    );
+
+    log.info(`Backfill complete`, { spaceOk, spaceSkip, spaceFail, availOk, availFail });
+  } catch (err) {
+    logger.error('Admin fix-listing-subresources error', { error: err.message });
+    if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
   }
 });
 
