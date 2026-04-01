@@ -49,6 +49,11 @@ const SOURCE_ONLY_FIELDS = new Set([
   // Including it causes the destination to store an orphaned reference to a source
   // account complex entity that doesn't exist in the destination. → dashboard errors.
   'complexId',
+  // subListingsIds on MTL parent listings contains SOURCE sub-unit IDs.
+  // They must never be forwarded to the destination as-is; they would point to
+  // non-existent listings.  After all sub-units are created we do a PATCH with
+  // correctly remapped destination IDs (see post-processing step below).
+  'subListingsIds',
   // NOTE: parentId is intentionally NOT in this set — it needs remapping for complex listings
 ]);
 
@@ -1178,6 +1183,41 @@ async function runMigration(migrationId) {
           })
         );
         log.info(`listings: calendar block migration complete`);
+      }
+
+      // ── Post-processing: remap subListingsIds on MTL parent listings ────────
+      // subListingsIds is stripped from SOURCE_ONLY_FIELDS during creation to
+      // prevent the destination parent from holding source-account sub-unit IDs.
+      // Now that all sub-units are in idMap, we can PATCH each parent listing
+      // with the correctly remapped destination sub-unit IDs.
+      // This is what makes Guesty's "Details and Layout" show units as assigned.
+      if (category === 'listings') {
+        const parents = (Array.isArray(rawItems) ? rawItems : [])
+          .filter(l => Array.isArray(l.subListingsIds) && l.subListingsIds.length > 0);
+        if (parents.length > 0) {
+          log.info(`listings: remapping subListingsIds for ${parents.length} MTL parent(s)`);
+          await Promise.allSettled(
+            parents.map(async (srcParent) => {
+              const srcParentId = srcParent._id || srcParent.id;
+              const destParentId = idMap[srcParentId];
+              if (!destParentId) return; // parent wasn't migrated
+              const destSubIds = srcParent.subListingsIds
+                .map(srcSubId => idMap[srcSubId])
+                .filter(Boolean);
+              if (destSubIds.length === 0) return; // no sub-units migrated
+              try {
+                await destClient.updateListing(destParentId, { subListingsIds: destSubIds });
+                log.info(`listings: subListingsIds remapped`, { destParentId, count: destSubIds.length });
+              } catch (err) {
+                log.warn(`listings: subListingsIds PATCH failed`, {
+                  destParentId,
+                  status: err.response?.status,
+                  error: err.response?.data?.message || err.message,
+                });
+              }
+            })
+          );
+        }
       }
 
       idMaps[category] = idMap;

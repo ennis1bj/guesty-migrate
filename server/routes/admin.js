@@ -470,10 +470,56 @@ router.post('/migrations/:id/fix-listing-subresources', async (req, res) => {
       }
     }
 
+    // ── Step 4: Remap subListingsIds on the MTL parent ──────────────────────
+    // The parent was created with SOURCE sub-unit IDs in subListingsIds (they
+    // were not in SOURCE_ONLY_FIELDS at migration time).  Guesty's
+    // "Details and Layout" reads this array to show assigned units.
+    // Replace it with destination sub-unit IDs derived from the idMap.
+    let subListingsOk = false;
+    if (destParentId) {
+      const destSubUnitIds = Object.entries(idMap)
+        .filter(([srcId]) => srcId !== SOURCE_PARENT_ID)
+        .map(([, destId]) => destId)
+        .filter(Boolean);
+      log.info(`Patching subListingsIds on parent`, {
+        destParentId,
+        count: destSubUnitIds.length,
+      });
+      try {
+        await destClient.updateListing(destParentId, { subListingsIds: destSubUnitIds });
+        subListingsOk = true;
+        log.info(`subListingsIds patched successfully`, { destParentId, count: destSubUnitIds.length });
+      } catch (err) {
+        log.warn(`subListingsIds PATCH failed`, {
+          destParentId,
+          status: err.response?.status,
+          error: err.response?.data?.message || err.message,
+        });
+      }
+
+      // ── Diagnostic: log bathroom/room info from destination parent ───────
+      // This tells us whether bathroom data came over during the original
+      // migration so we know if a separate bathroom backfill is needed.
+      try {
+        const current = await destClient.getListingById(destParentId);
+        log.info(`Destination parent diagnostic`, {
+          destParentId,
+          bathrooms: current?.bathrooms ?? 'MISSING',
+          bedrooms: current?.bedrooms ?? 'MISSING',
+          accommodates: current?.accommodates ?? 'MISSING',
+          roomsInfoCount: Array.isArray(current?.roomsInfo) ? current.roomsInfo.length : 'MISSING',
+          subListingsIdsCount: Array.isArray(current?.subListingsIds) ? current.subListingsIds.length : 'MISSING',
+        });
+      } catch (err) {
+        log.warn(`Failed to fetch destination parent for diagnostic`, { error: err.message });
+      }
+    }
+
     log.info(`Backfill complete`, {
       complexClearOk, complexClearFail,
       complexUpdateOk, complexUpdateFail,
       availOk, availFail,
+      subListingsOk,
       newComplexId,
     });
   } catch (err) {
