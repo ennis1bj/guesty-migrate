@@ -522,9 +522,14 @@ router.post('/migrations/:id/fix-listing-subresources', async (req, res) => {
           const { stripFieldsDeep } = require('../migrationEngine');
           layoutPatch.roomsInfo = stripFieldsDeep(srcParent.roomsInfo);
         }
-        if (srcParent?.propertyType && typeof srcParent.propertyType === 'object') {
-          const { stripFieldsDeep } = require('../migrationEngine');
-          layoutPatch.propertyType = stripFieldsDeep(srcParent.propertyType);
+        if (srcParent?.propertyType) {
+          // propertyType can be a plain string ("Condominium") or an object
+          if (typeof srcParent.propertyType === 'object') {
+            const { stripFieldsDeep } = require('../migrationEngine');
+            layoutPatch.propertyType = stripFieldsDeep(srcParent.propertyType);
+          } else {
+            layoutPatch.propertyType = srcParent.propertyType;
+          }
         }
 
         if (Object.keys(layoutPatch).length > 0) {
