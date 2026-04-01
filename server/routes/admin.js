@@ -303,6 +303,38 @@ router.post('/migrations/:id/reprocess', async (req, res) => {
   }
 });
 
+// ── POST /api/admin/migrations/:id/retry — re-queue preserving idMap ─────────
+// Unlike /reprocess (which wipes results+logs for a full restart), /retry keeps
+// existing results and migration_logs intact so the engine can resume a partial
+// migration — only categories with status 'partial' are re-run, and already-
+// created items within those categories are skipped via the stored idMap.
+
+router.post('/migrations/:id/retry', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `UPDATE migrations
+       SET status = 'paid',
+           error_message = NULL,
+           completed_at = NULL,
+           retry_count = retry_count + 1
+       WHERE id = $1
+       RETURNING id, status, retry_count`,
+      [id]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Migration not found' });
+    }
+    const { enqueueMigration } = require('../queue');
+    await enqueueMigration(id, { priority: 1 });
+    logger.info('Migration retried by admin (preserving idMap)', { migrationId: id, adminId: req.user.id });
+    res.json({ ok: true, migration: result.rows[0] });
+  } catch (err) {
+    logger.error('Admin retry migration error', { error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ── GET /api/admin/users/search — search users by email ─────────────────────
 
 router.get('/users/search', async (req, res) => {

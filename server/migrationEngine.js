@@ -153,6 +153,19 @@ const CATEGORIES = {
     },
     transform: (item, maps) => {
       const cleaned = stripFieldsDeep(item);
+
+      // Ensure title is a non-empty string — Guesty's POST /listings API
+      // requires it, but MTL_CHILD listings created after ~mid-2024 often
+      // store title as null (they rely on the channel to supply a display name).
+      // Fall back through common name fields before using a generic placeholder.
+      if (typeof cleaned.title !== 'string' || !cleaned.title.trim()) {
+        cleaned.title =
+          (typeof cleaned.nickname === 'string' && cleaned.nickname.trim()) ? cleaned.nickname :
+          (typeof cleaned.internalName === 'string' && cleaned.internalName.trim()) ? cleaned.internalName :
+          (typeof cleaned.name === 'string' && cleaned.name.trim()) ? cleaned.name :
+          'Unit';
+      }
+
       // Remap parentId for sub-units (complex listing children)
       if (cleaned.parentId && maps.listings) {
         cleaned.parentId = maps.listings[cleaned.parentId] || cleaned.parentId;
@@ -467,7 +480,7 @@ async function logCategory(migrationId, category, status, sourceCount, migratedC
 async function loadPreviousResults(migrationId) {
   const [logsResult, migResult] = await Promise.all([
     pool.query(
-      `SELECT category, migrated_count FROM migration_logs
+      `SELECT category, migrated_count, status FROM migration_logs
        WHERE migration_id = $1 ORDER BY created_at ASC`,
       [migrationId]
     ),
@@ -477,16 +490,22 @@ async function loadPreviousResults(migrationId) {
     ),
   ]);
 
-  // Map of category -> already migrated count (from migration_logs)
+  // Map of category -> already migrated count (from migration_logs).
+  // Also track category status — only 'complete' categories should be skipped
+  // on retry; 'partial' ones must be re-run using the stored idMap so that
+  // already-created items are skipped (via idMap lookup) and only the failures
+  // are retried.
   const prev = {};
+  const prevStatus = {};
   for (const row of logsResult.rows) {
     prev[row.category] = row.migrated_count || 0;
+    prevStatus[row.category] = row.status;
   }
 
   // Full stored results JSONB — used to recover idMaps and photo errors on retry
   const storedResults = migResult.rows[0]?.results || {};
 
-  return { prev, storedResults };
+  return { prev, prevStatus, storedResults };
 }
 
 async function runMigration(migrationId) {
@@ -511,7 +530,7 @@ async function runMigration(migrationId) {
 
   const migration = migResult.rows[0];
 
-  const { prev: previousResults, storedResults } = await loadPreviousResults(migrationId);
+  const { prev: previousResults, prevStatus: previousStatus, storedResults } = await loadPreviousResults(migrationId);
 
   const sourceClient = new GuestyClient({
     clientId: decrypt(migration.source_client_id),
@@ -558,9 +577,11 @@ async function runMigration(migrationId) {
     }
 
     // Skip categories that already completed successfully in a prior run,
-    // but first restore their idMap so dependent categories can remap IDs,
-    // and for listings specifically retry any photo uploads that previously failed.
-    if (previousResults[category] > 0) {
+    // but first restore their idMap so dependent categories can remap IDs.
+    // Only skip if status is 'complete' — 'partial' categories (some items
+    // succeeded, some failed) must be re-run: the creation loop itself skips
+    // items already present in the idMap, so only failed items get retried.
+    if (previousResults[category] > 0 && previousStatus[category] === 'complete') {
       log.info(`Skipping ${category} — already migrated in prior run`, { count: previousResults[category] });
 
       // Restore the stored idMap so dependent categories (reservations, tasks,
@@ -570,11 +591,17 @@ async function runMigration(migrationId) {
         idMaps[category] = storedIdMap;
       }
 
-      // Photo retry no longer needed — photos are included in the listing
-      // create body (see pictures[] in POST /listings payload). Guesty's Open
-      // API v1 does not expose a working separate photo upload endpoint.
-
       continue;
+    }
+
+    // For partial categories being retried: restore the existing idMap so items
+    // that already succeeded (have a destination ID) are skipped in the loop.
+    if (previousResults[category] > 0 && previousStatus[category] !== 'complete') {
+      log.info(`Resuming partial ${category} — restoring idMap from prior run`, { count: previousResults[category] });
+      const storedIdMap = storedResults[category]?.idMap;
+      if (storedIdMap && typeof storedIdMap === 'object') {
+        idMaps[category] = storedIdMap;
+      }
     }
 
     try {
