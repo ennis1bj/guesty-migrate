@@ -674,9 +674,16 @@ router.post('/migrations/:id/recreate-sub-units', async (req, res) => {
 
   try {
     const { id } = req.params;
-    const { targetMtlP, destParentId, dryRun = false } = req.body;
-    if (!targetMtlP || !destParentId) {
-      return res.status(400).json({ error: 'targetMtlP and destParentId are required' });
+    // subUnitIds: explicit list of dest IDs to process (skips mtl.p scan)
+    // targetMtlP: scan all listings and match by mtl.p (ignored when subUnitIds given)
+    // destParentId: listing _id of the destination parent
+    // destParentMtlId: parent's mtl._id — if given, set mtl.p on recreated sub-units
+    const { targetMtlP, destParentId, destParentMtlId, subUnitIds, dryRun = false } = req.body;
+    if (!destParentId) {
+      return res.status(400).json({ error: 'destParentId is required' });
+    }
+    if (!subUnitIds && !targetMtlP) {
+      return res.status(400).json({ error: 'Either subUnitIds (array) or targetMtlP is required' });
     }
 
     const migResult = await pool.query(
@@ -695,21 +702,27 @@ router.post('/migrations/:id/recreate-sub-units', async (req, res) => {
 
     res.status(202).json({ message: 'recreate-sub-units started', totalListings: allDestIds.length, dryRun });
 
-    // Step 1: fetch mtl.p for each listing in parallel (semaphored inside GuestyClient)
-    logger.info('recreate-sub-units: scanning all dest listings for mtl.p', { migrationId: id, count: allDestIds.length });
-    const mtlPResults = await Promise.allSettled(
-      allDestIds.map(async destId => {
-        const l = await destClient.getListingById(destId);
-        return { destId, mtlP: l?.mtl?.p ?? null, type: l?.type };
-      })
-    );
+    let matches;
+    if (Array.isArray(subUnitIds) && subUnitIds.length > 0) {
+      matches = subUnitIds;
+      logger.info('recreate-sub-units: using explicit subUnitIds', { migrationId: id, count: matches.length, dryRun });
+    } else {
+      // Step 1: fetch mtl.p for each listing in parallel (semaphored inside GuestyClient)
+      logger.info('recreate-sub-units: scanning all dest listings for mtl.p', { migrationId: id, count: allDestIds.length });
+      const mtlPResults = await Promise.allSettled(
+        allDestIds.map(async destId => {
+          const l = await destClient.getListingById(destId);
+          return { destId, mtlP: l?.mtl?.p ?? null, type: l?.type };
+        })
+      );
 
-    // Step 2: identify matches
-    const matches = mtlPResults
-      .filter(r => r.status === 'fulfilled' && r.value.mtlP === targetMtlP)
-      .map(r => r.value.destId);
+      // Step 2: identify matches
+      matches = mtlPResults
+        .filter(r => r.status === 'fulfilled' && r.value.mtlP === targetMtlP)
+        .map(r => r.value.destId);
 
-    logger.info('recreate-sub-units: identified matching sub-units', { migrationId: id, targetMtlP, count: matches.length, dryRun });
+      logger.info('recreate-sub-units: identified matching sub-units', { migrationId: id, targetMtlP, count: matches.length, dryRun });
+    }
 
     if (dryRun) {
       logger.info('recreate-sub-units: dry-run complete', { migrationId: id, matches });
@@ -730,6 +743,11 @@ router.post('/migrations/:id/recreate-sub-units', async (req, res) => {
         payload.parentId = destParentId;
         // Ensure correct type
         payload.type = 'MTL_CHILD';
+        // Explicitly set mtl.p to the parent's mtl._id so Guesty wires it correctly.
+        // mtl is stripped by cleanForRecreate (SOURCE_ONLY_FIELDS); add it back here.
+        if (destParentMtlId) {
+          payload.mtl = { p: destParentMtlId };
+        }
 
         // Delete old sub-unit
         await destClient.request('DELETE', `/listings/${oldDestId}`);
