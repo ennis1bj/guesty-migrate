@@ -222,6 +222,27 @@ router.post('/beta/:userId/invoice', async (req, res) => {
   }
 });
 
+// ── GET /api/admin/migrations/:id — full migration detail (admin only) ────────
+
+router.get('/migrations/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `SELECT id, user_id, status, results, error_message, selected_listing_ids,
+              pricing_mode, started_at, completed_at, last_progress_at, created_at
+       FROM migrations WHERE id = $1`,
+      [id]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Migration not found' });
+    }
+    res.json({ migration: result.rows[0] });
+  } catch (err) {
+    logger.error('Admin get migration error', { error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ── POST /api/admin/migrations/:id/cancel — force-fail a running migration ──
 
 router.post('/migrations/:id/cancel', async (req, res) => {

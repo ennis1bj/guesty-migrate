@@ -1112,7 +1112,18 @@ async function runMigration(migrationId) {
         ...(Object.keys(idMap).length > 0 ? { idMap } : {}),
       };
 
-      if (failedCount > 0) hasFailures = true;
+      if (failedCount > 0) {
+        hasFailures = true;
+        // Log first 5 failures so they are visible in deployment logs without
+        // needing to query the DB — makes remote debugging much faster.
+        log.warn(`${category}: ${failedCount} item(s) failed to migrate`, {
+          sample: errors.slice(0, 5).map(e => ({
+            sourceId: e.sourceId,
+            status: e.status,
+            error: typeof e.error === 'string' ? e.error.slice(0, 200) : e.error,
+          })),
+        });
+      }
 
       const photosForLog = category === 'listings' ? totalPhotos : null;
       await logCategory(migrationId, category, failedCount === 0 ? 'complete' : 'partial', sourceCount, migratedCount, failedCount, skippedCount, errors.length > 0 ? errors : null, photosForLog);
