@@ -11,9 +11,9 @@ describe('encrypt / decrypt', () => {
     expect(decrypt(encrypt(secret))).toBe(secret);
   });
 
-  test('encrypt produces a hex-prefixed colon-delimited string', () => {
+  test('encrypt produces a gcm-prefixed colon-delimited string', () => {
     const token = encrypt('test');
-    expect(token).toMatch(/^[0-9a-f]{32}:/);
+    expect(token).toMatch(/^gcm:[0-9a-f]+:/);
   });
 
   test('two encryptions of the same plaintext produce different ciphertexts (random IV)', () => {

@@ -1,9 +1,10 @@
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 require('dotenv').config();
+const { logger } = require('./logger');
 
 if (!process.env.DATABASE_URL) {
-  console.error('DATABASE_URL environment variable is required but not set.');
+  process.stderr.write('DATABASE_URL environment variable is required but not set.\n');
   process.exit(1);
 }
 
@@ -200,7 +201,7 @@ const migrate = async () => {
       ALTER TABLE migrations ADD COLUMN IF NOT EXISTS last_progress_at TIMESTAMPTZ;
     `);
 
-    console.log('Database migrations completed successfully');
+    logger.info('Database migrations completed successfully');
 
     // ── Auto-seed admin from environment variables ──────────────────────────
     const adminEmail    = process.env.ADMIN_EMAIL;
@@ -217,7 +218,7 @@ const migrate = async () => {
          RETURNING id, email, is_admin`,
         [adminEmail, hash],
       );
-      console.log(`Admin account ready: ${rows[0].email} (id: ${rows[0].id})`);
+      logger.info('Admin account ready', { email: rows[0].email, id: rows[0].id });
     }
   } finally {
     client.release();
@@ -229,7 +230,7 @@ if (require.main === module) {
   migrate()
     .then(() => process.exit(0))
     .catch((err) => {
-      console.error('Migration failed:', err);
+      logger.error('Migration failed', { error: err.message });
       process.exit(1);
     });
 }
@@ -245,10 +246,10 @@ const purgeExpiredCredentials = async () => {
         AND source_client_id IS NOT NULL
     `);
     if (result.rowCount > 0) {
-      console.log(`Purged credentials from ${result.rowCount} expired migration(s)`);
+      logger.info(`Purged credentials from ${result.rowCount} expired migration(s)`);
     }
   } catch (err) {
-    console.error('Failed to purge expired credentials:', err.message);
+    logger.error('Failed to purge expired credentials', { error: err.message });
   }
 };
 
@@ -260,10 +261,10 @@ const purgeStalePendingMigrations = async () => {
          AND created_at < NOW() - INTERVAL '24 hours'`
     );
     if (result.rowCount > 0) {
-      console.log(`Purged ${result.rowCount} stale pending migration(s)`);
+      logger.info(`Purged ${result.rowCount} stale pending migration(s)`);
     }
   } catch (err) {
-    console.error('Failed to purge stale pending migrations:', err.message);
+    logger.error('Failed to purge stale pending migrations', { error: err.message });
   }
 };
 

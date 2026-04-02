@@ -5,10 +5,10 @@
 const { getTierFromListings, calculatePerListingCents, getAddonPriceMap, PRICING_TIERS, ADDON_DEFINITIONS } = require('../server/pricing');
 
 describe('getTierFromListings', () => {
-  test('returns starter for 1-10 listings', () => {
-    expect(getTierFromListings(1).tier).toBe('starter');
-    expect(getTierFromListings(10).tier).toBe('starter');
-    expect(getTierFromListings(10).amountCents).toBe(14900);
+  test('returns per_listing for 1-10 listings', () => {
+    expect(getTierFromListings(1).tier).toBe('per_listing');
+    expect(getTierFromListings(10).tier).toBe('per_listing');
+    expect(getTierFromListings(10).amountCents).toBe(7900 + 10 * 800);
   });
 
   test('returns growth for 11-50 listings', () => {

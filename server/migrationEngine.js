@@ -5,6 +5,7 @@ const { sendMigrationReport } = require('./email');
 const { logger } = require('./logger');
 
 function extractPhotoUrl(pic) {
+  if (pic == null) return null;
   return typeof pic === 'string' ? pic : (pic.original || pic.thumbnail || pic.url || null);
 }
 

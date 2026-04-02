@@ -128,8 +128,7 @@ app.get('/api/health', async (req, res) => {
     await pool.query('SELECT 1');
     const queueHealth = getQueueHealth();
     const status = queueHealth.degraded ? 'degraded' : 'ok';
-    const statusCode = queueHealth.degraded ? 200 : 200; // still 200 — app works in degraded mode
-    res.status(statusCode).json({
+    res.status(200).json({
       status,
       timestamp: new Date().toISOString(),
       database: 'connected',

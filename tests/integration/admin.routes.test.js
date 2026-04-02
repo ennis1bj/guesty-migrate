@@ -19,6 +19,9 @@ process.env.ENCRYPTION_KEY = '0'.repeat(64);
 process.env.DATABASE_URL   = 'postgresql://test:test@localhost:5432/test';
 process.env.STRIPE_SECRET_KEY = 'sk_test_fake';
 
+// ── Rate-limit bypass (all limiters become pass-through in tests) ─────────────
+jest.mock('express-rate-limit', () => () => (req, res, next) => next());
+
 // ── Stripe mock (must be before any require of server/index) ──────────────────
 const mockStripeCustomers    = { list: jest.fn(), create: jest.fn() };
 const mockStripeInvoiceItems = { create: jest.fn() };
@@ -139,7 +142,25 @@ const BETA_PARTICIPANT = {
 };
 
 beforeEach(() => {
-  jest.clearAllMocks();
+  // resetAllMocks clears calls AND the mockResolvedValueOnce queues so stale
+  // queued values from auth-guard tests (which never consume the DB mock) do
+  // not bleed into subsequent endpoint tests.
+  jest.resetAllMocks();
+
+  // requireAdmin re-verifies admin status from the DB on every authenticated
+  // request. This queued mock is consumed by requireAdmin first; each test then
+  // adds its own mockResolvedValueOnce for the actual endpoint query.
+  pool.query.mockResolvedValueOnce({ rows: [{ is_admin: true }] });
+
+  // jest.resetAllMocks() wipes the implementation of the stripe factory
+  // jest.fn() (the module-level mock). Restore it so require('stripe')(key)
+  // always returns the correct { customers, invoiceItems, invoices } object.
+  const stripeModule = require('stripe');
+  stripeModule.mockImplementation(() => ({
+    customers:    mockStripeCustomers,
+    invoiceItems: mockStripeInvoiceItems,
+    invoices:     mockStripeInvoices,
+  }));
 
   // Default Stripe mock responses
   mockStripeCustomers.list.mockResolvedValue({ data: [{ id: 'cus-mock-001' }] });

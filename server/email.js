@@ -1,3 +1,5 @@
+const { logger } = require('./logger');
+
 let resendClient = null;
 
 function getClient() {
@@ -7,11 +9,11 @@ function getClient() {
     const { Resend } = require('resend');
     resendClient = new Resend(process.env.RESEND_API_KEY);
   } else {
-    // Fallback: log emails to console
+    // Fallback: log emails via structured logger when Resend is not configured
     resendClient = {
       emails: {
         send: async (options) => {
-          console.log('Email (no Resend configured):', JSON.stringify(options, null, 2));
+          logger.info('Email (no Resend configured)', { to: options.to, subject: options.subject });
           return { id: 'console-' + Date.now() };
         },
       },

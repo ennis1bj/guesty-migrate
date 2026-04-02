@@ -1,15 +1,16 @@
 const { getTierFromListings, calculatePerListingCents } = require('../../server/pricing');
 
 describe('getTierFromListings', () => {
-  test('1 listing → starter tier at $149', () => {
+  test('1 listing → per_listing tier (base $79 + 1×$8 = $87)', () => {
     const result = getTierFromListings(1);
-    expect(result.tier).toBe('starter');
-    expect(result.amountCents).toBe(14900);
-    expect(result.priceEnvKey).toBe('STRIPE_PRICE_STARTER');
+    expect(result.tier).toBe('per_listing');
+    expect(result.amountCents).toBe(7900 + 800);
+    expect(result.priceEnvKey).toBeUndefined();
   });
 
-  test('10 listings → starter (boundary)', () => {
-    expect(getTierFromListings(10).tier).toBe('starter');
+  test('10 listings → per_listing (boundary)', () => {
+    expect(getTierFromListings(10).tier).toBe('per_listing');
+    expect(getTierFromListings(10).amountCents).toBe(7900 + 10 * 800);
   });
 
   test('11 listings → growth tier at $349', () => {
