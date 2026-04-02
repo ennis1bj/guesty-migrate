@@ -71,7 +71,14 @@ router.post('/preflight', async (req, res) => {
         title:            l.title || l.nickname || `Listing ${l._id}`,
         nickname:         l.nickname || null,
         type:             l.type || 'STL',
-        complexId:        l.complexId || null,
+        // Use parentId (the MTL parent listing's own _id) as complexId so the
+        // frontend's allRoomsMap can group sub-units under the correct parent row.
+        // Guesty's complexId points to a separate complex *entity* (not a listing),
+        // so using it directly would cause allRoomsMap.get(parentListingId) to miss
+        // all sub-units and show "Cannot migrate / No sub-units found".
+        // MTL parent listings have parentId=null, so they get complexId=null and
+        // are correctly identified by the frontend as true parents (!l.complexId).
+        complexId:        l.parentId || null,
         parentId:         l.parentId || null,
         city:             l.address?.city || null,
         state:            l.address?.state || null,
