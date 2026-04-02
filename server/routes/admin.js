@@ -1632,6 +1632,257 @@ router.post('/migrations/:id/manual-assign-mtl-subunits', async (req, res) => {
   }
 });
 
+// ── POST /api/admin/migrations/:id/recreate-missing-mtl-parents ──────────────
+// Identifies orphaned MTL_CHILD sub-units whose mtl.p points to a source
+// standalone parent that was never created in the destination account.
+// For each missing dest parent it:
+//   1. Fetches the source parent listing data
+//   2. Creates a matching dest MTL parent (same nickname, address, etc.)
+//   3. Re-parents all orphaned sub-units in that group to the new dest parent
+//
+// This is the automated equivalent of "recreate the source MTL structure in
+// the destination" — no manual mapping needed.
+//
+// Body: { dryRun: false }
+// Response: 202 with a { report } object (async fix logged to server).
+
+router.post('/migrations/:id/recreate-missing-mtl-parents', async (req, res) => {
+  const ADDITIONAL_STRIP = new Set([
+    '__v', 'lastUpdatedAt', 'lastActivityAt', 'cleaningStatus',
+    'pendingTasks', 'occupancyStats', 'SaaS', 'sourceOfCreation', 'pms',
+    'activeReservationCount', 'sales', 'commissionFormula',
+    'netIncomeFormula', 'ownerRevenueFormula',
+    // yieldManagement contains nested _id fields that stripFieldsDeep removes,
+    // causing Guesty validation to fail ("_id is required"). Let Guesty create
+    // it fresh with defaults instead.
+    'yieldManagement',
+  ]);
+
+  function cleanForRecreate(listing) {
+    const stripped = stripFieldsDeep(listing);
+    const cleaned = {};
+    for (const [k, v] of Object.entries(stripped)) {
+      if (!ADDITIONAL_STRIP.has(k)) cleaned[k] = v;
+    }
+    return cleaned;
+  }
+
+  try {
+    const { id } = req.params;
+    const { dryRun = false } = req.body;
+
+    const migResult = await pool.query(
+      `SELECT source_client_id, source_client_secret,
+              dest_client_id, dest_client_secret, results
+       FROM migrations WHERE id = $1`,
+      [id]
+    );
+    if (migResult.rowCount === 0) return res.status(404).json({ error: 'Migration not found' });
+    const row = migResult.rows[0];
+
+    const sourceClient = new GuestyClient({
+      clientId: decrypt(row.source_client_id),
+      clientSecret: decrypt(row.source_client_secret),
+    });
+    const destClient = new GuestyClient({
+      clientId: decrypt(row.dest_client_id),
+      clientSecret: decrypt(row.dest_client_secret),
+    });
+
+    // Step 1: fetch all dest listings and build parent map + sub-unit list
+    logger.info('recreate-missing-mtl-parents: fetching all dest listings', { migrationId: id });
+    const allDestListings = await destClient.getAllListings();
+    const destParentMap = {};
+    const destNickToParentId = {};
+    for (const l of allDestListings) {
+      if (l.type === 'MTL' && l.mtl?._id) {
+        destParentMap[l._id] = { mtlId: l.mtl._id, title: l.title || l.nickname || l._id };
+        if (l.nickname) destNickToParentId[l.nickname] = l._id;
+      }
+    }
+    const validMtlIds = new Set(Object.values(destParentMap).map(p => p.mtlId));
+
+    // Step 2: individually fetch all dest sub-units to read their mtl.p
+    const destSubUnitIds = allDestListings.filter(l => l.type === 'MTL_CHILD').map(l => l._id);
+    logger.info('recreate-missing-mtl-parents: fetching dest sub-unit details', { migrationId: id, count: destSubUnitIds.length });
+    const subUnitDetails = await destClient.getListingsByIds(destSubUnitIds);
+
+    // Step 3: identify orphaned sub-units (mtl.p not in validMtlIds)
+    const wrongGroups = {};
+    for (const sub of subUnitDetails) {
+      const currentMtlP = sub.mtl?.p;
+      if (!currentMtlP || validMtlIds.has(currentMtlP)) continue;
+      if (!wrongGroups[currentMtlP]) wrongGroups[currentMtlP] = [];
+      wrongGroups[currentMtlP].push(sub);
+    }
+
+    const srcParentIds = Object.keys(wrongGroups);
+    logger.info('recreate-missing-mtl-parents: orphaned groups found', { migrationId: id, groups: srcParentIds.length, totalSubUnits: subUnitDetails.filter(s => !validMtlIds.has(s.mtl?.p)).length });
+
+    const report = {
+      dryRun,
+      orphanedGroups: srcParentIds.length,
+      totalOrphanedSubUnits: Object.values(wrongGroups).reduce((sum, g) => sum + g.length, 0),
+      groups: [],
+    };
+
+    res.status(202).json({ message: 'recreate-missing-mtl-parents started', dryRun, report });
+
+    if (dryRun) {
+      // Just fetch source parents for the report
+      const srcParents = await sourceClient.getListingsByIds(srcParentIds);
+      for (const sp of srcParents) {
+        const subUnits = wrongGroups[sp._id] || [];
+        report.groups.push({
+          srcParentId: sp._id,
+          srcParentNick: sp.nickname,
+          subUnitCount: subUnits.length,
+          alreadyInDest: !!destNickToParentId[sp.nickname],
+          subUnits: subUnits.map(s => ({ id: s._id, nick: s.nickname })),
+        });
+      }
+      logger.info('recreate-missing-mtl-parents: dry-run complete', { migrationId: id, report });
+      return;
+    }
+
+    // Step 4: for each source parent group, create dest parent if missing, then reassign sub-units
+    const idMap = { ...(row.results?.listings?.idMap || {}) };
+    const reversedIdMap = Object.fromEntries(Object.entries(idMap).map(([s, d]) => [d, s]));
+    const idMapUpdates = {};
+
+    // Fetch all source parents in one batch
+    logger.info('recreate-missing-mtl-parents: fetching source parents', { migrationId: id, count: srcParentIds.length });
+    const srcParents = await sourceClient.getListingsByIds(srcParentIds);
+    const srcParentById = Object.fromEntries(srcParents.map(p => [p._id, p]));
+
+    for (const srcParentId of srcParentIds) {
+      const srcParent = srcParentById[srcParentId];
+      if (!srcParent) {
+        logger.warn('recreate-missing-mtl-parents: source parent not found', { migrationId: id, srcParentId });
+        continue;
+      }
+
+      const subUnits = wrongGroups[srcParentId] || [];
+      logger.info('recreate-missing-mtl-parents: processing group', {
+        migrationId: id, srcParentNick: srcParent.nickname, subUnitCount: subUnits.length,
+      });
+
+      // Check if dest already has a parent with this nickname
+      let destParentListingId = destNickToParentId[srcParent.nickname] || null;
+      let destParentMtlId = destParentListingId ? destParentMap[destParentListingId]?.mtlId : null;
+
+      if (!destParentListingId) {
+        // Create new dest MTL parent from source parent data
+        try {
+          const payload = cleanForRecreate(srcParent);
+          // Ensure type is MTL and no child fields are set
+          payload.type = 'MTL';
+          delete payload.parentId;
+          // Include source mtl._id so Guesty adopts it as the dest parent's mtl._id.
+          // Stripping mtl entirely causes Guesty to create the parent without an mtl
+          // identity, making it impossible to wire sub-units via mtl.p.
+          payload.mtl = srcParent.mtl?._id ? { _id: srcParent.mtl._id } : {};
+
+          logger.info('recreate-missing-mtl-parents: creating dest parent', { migrationId: id, srcParentNick: srcParent.nickname });
+          const created = await destClient.request('POST', '/listings', payload);
+          destParentListingId = created?._id;
+          destParentMtlId = created?.mtl?._id;
+
+          if (!destParentListingId) {
+            logger.error('recreate-missing-mtl-parents: no _id from parent creation', { migrationId: id, srcParentNick: srcParent.nickname });
+            continue;
+          }
+
+          logger.info('recreate-missing-mtl-parents: created dest parent', {
+            migrationId: id, srcParentNick: srcParent.nickname, destParentListingId, destParentMtlId,
+          });
+
+          // Update dest lookup maps so subsequent groups don't re-create
+          destParentMap[destParentListingId] = { mtlId: destParentMtlId, title: srcParent.nickname };
+          destNickToParentId[srcParent.nickname] = destParentListingId;
+          validMtlIds.add(destParentMtlId);
+
+          // Track source→dest idMap for the newly created parent
+          if (srcParentId) idMapUpdates[srcParentId] = destParentListingId;
+        } catch (err) {
+          logger.error('recreate-missing-mtl-parents: failed to create dest parent', {
+            migrationId: id, srcParentNick: srcParent.nickname, error: err.message,
+          });
+          continue;
+        }
+      } else {
+        logger.info('recreate-missing-mtl-parents: dest parent already exists', {
+          migrationId: id, srcParentNick: srcParent.nickname, destParentListingId,
+        });
+        // If bulk-listing didn't return mtl._id (Guesty omits it from bulk results),
+        // fetch the parent individually to get it.
+        if (!destParentMtlId) {
+          try {
+            const fullParent = await destClient.request('GET', '/listings/' + destParentListingId);
+            destParentMtlId = fullParent.mtl?._id || null;
+          } catch (_) { /* best effort */ }
+        }
+      }
+
+      // Re-parent each orphaned sub-unit to the new/existing dest parent
+      let ok = 0; let failed = 0;
+      for (const sub of subUnits) {
+        const oldDestId = sub._id;
+        try {
+          const fullListing = await destClient.getListingById(oldDestId);
+          if (!fullListing) throw new Error('Could not fetch ' + oldDestId);
+
+          const payload = cleanForRecreate(fullListing);
+          payload.parentId = destParentListingId;
+          payload.type = 'MTL_CHILD';
+          payload.mtl = destParentMtlId ? { p: destParentMtlId } : undefined;
+          // Guesty requires title to be a non-null string
+          if (!payload.title || typeof payload.title !== 'string') {
+            payload.title = String(payload.nickname || 'Untitled');
+          }
+
+          await destClient.request('DELETE', `/listings/${oldDestId}`);
+          logger.info('recreate-missing-mtl-parents: deleted old sub-unit', { migrationId: id, oldDestId });
+
+          const created = await destClient.request('POST', '/listings', payload);
+          const newDestId = created?._id;
+          if (!newDestId) throw new Error('No _id returned from POST for ' + oldDestId);
+
+          logger.info('recreate-missing-mtl-parents: recreated sub-unit', {
+            migrationId: id, oldDestId, newDestId, destParentListingId, srcParentNick: srcParent.nickname,
+          });
+
+          const srcSubId = reversedIdMap[oldDestId];
+          if (srcSubId) idMapUpdates[srcSubId] = newDestId;
+          ok++;
+        } catch (err) {
+          logger.error('recreate-missing-mtl-parents: failed for sub-unit', {
+            migrationId: id, oldDestId, error: err.message,
+          });
+          failed++;
+        }
+      }
+      logger.info('recreate-missing-mtl-parents: group complete', {
+        migrationId: id, srcParentNick: srcParent.nickname, ok, failed,
+      });
+    }
+
+    // Step 5: persist idMap updates
+    if (Object.keys(idMapUpdates).length > 0) {
+      const current = await pool.query(`SELECT results FROM migrations WHERE id = $1`, [id]);
+      const existingResults = current.rows[0]?.results || {};
+      const newIdMap = { ...(existingResults.listings?.idMap || {}), ...idMapUpdates };
+      const updatedResults = { ...existingResults, listings: { ...existingResults.listings, idMap: newIdMap } };
+      await pool.query(`UPDATE migrations SET results = $1 WHERE id = $2`, [JSON.stringify(updatedResults), id]);
+      logger.info('recreate-missing-mtl-parents: idMap updated', { migrationId: id, updated: Object.keys(idMapUpdates).length });
+    }
+
+    logger.info('recreate-missing-mtl-parents: all groups complete', { migrationId: id });
+  } catch (err) {
+    logger.error('recreate-missing-mtl-parents error', { error: err.message, stack: err.stack });
+  }
+});
+
 // ── POST /api/admin/migrations/:id/fix-listing-subresources ──────────────────
 // Backfills spaces + availability-settings for listings already created in the
 // destination account.  Runs async in the background; returns immediately.
