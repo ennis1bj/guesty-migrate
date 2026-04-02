@@ -413,6 +413,211 @@ router.get('/migrations/:id/diagnose-listings', async (req, res) => {
   }
 });
 
+// ── POST /api/admin/migrations/:id/source-mtl-mapping ────────────────────────
+// Queries the LIVE SOURCE Guesty account to determine which dest parent each
+// orphaned dest sub-unit belongs to.
+//
+// Strategy:
+//   1. Fetch all SOURCE listings; identify MTL parents + their mtl.c child IDs
+//   2. For each source MTL parent, fetch its children and read their mtl.p
+//      (which was manually set post-migration to = dest parent LISTING ID)
+//   3. Build mapping: srcParentMtlId → destParentListingId
+//   4. Fetch all DEST listings; find orphaned MTL_CHILD sub-units
+//   5. Each dest sub-unit has a wrong mtl.p = OLD source parent mtl._id
+//      → look that up in the map to find the correct dest parent
+//   6. Also try nickname matching as a fallback
+//
+// Returns: { resolved: [{ destSubUnitId, destSubUnitNick, destParentListingId,
+//                          destParentTitle, matchMethod }],
+//            unresolved: [...], srcParents: [...] }
+
+router.post('/migrations/:id/source-mtl-mapping', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const migResult = await pool.query(
+      `SELECT source_client_id, source_client_secret,
+              dest_client_id, dest_client_secret FROM migrations WHERE id = $1`,
+      [id]
+    );
+    if (migResult.rowCount === 0) return res.status(404).json({ error: 'Migration not found' });
+    const row = migResult.rows[0];
+
+    const srcClient = new GuestyClient({
+      clientId: decrypt(row.source_client_id),
+      clientSecret: decrypt(row.source_client_secret),
+    });
+    const destClient = new GuestyClient({
+      clientId: decrypt(row.dest_client_id),
+      clientSecret: decrypt(row.dest_client_secret),
+    });
+
+    // ── Step 1: fetch all SOURCE listings ──────────────────────────────────
+    logger.info('source-mtl-mapping: fetching all source listings', { migrationId: id });
+    const srcListings = await srcClient.getAllListings();
+    logger.info('source-mtl-mapping: fetched source listings', { migrationId: id, total: srcListings.length });
+
+    // Identify source MTL parents
+    const srcParents = srcListings.filter(l => l.type === 'MTL');
+    logger.info('source-mtl-mapping: source MTL parents', {
+      migrationId: id,
+      count: srcParents.length,
+      titles: srcParents.map(p => p.nickname || p.title || p._id),
+    });
+
+    // ── Step 2: for each source parent, fetch its children ─────────────────
+    // Each source parent's mtl.c contains source child listing IDs
+    // Each child's mtl.p = dest parent LISTING ID (set as tracking post-migration)
+    const srcParentToDestParent = {}; // srcParentMtlId → destParentListingId
+    const srcChildNickToDestParent = {}; // srcChildNickname → destParentListingId
+    const srcParentDetails = [];
+
+    for (const sp of srcParents) {
+      const childIds = Array.isArray(sp.mtl?.c) ? sp.mtl.c : [];
+      if (childIds.length === 0) {
+        logger.info('source-mtl-mapping: source parent has no children', { srcParentId: sp._id, title: sp.nickname || sp.title });
+        continue;
+      }
+
+      logger.info('source-mtl-mapping: fetching children for source parent', {
+        srcParentId: sp._id, title: sp.nickname || sp.title, childCount: childIds.length,
+      });
+
+      const children = await srcClient.getListingsByIds(childIds);
+
+      // Determine which dest parent this source parent maps to
+      // Children's mtl.p = dest parent listing ID (tracking)
+      const destParentVotes = {};
+      for (const child of children) {
+        const destListingId = child.mtl?.p;
+        if (destListingId) {
+          destParentVotes[destListingId] = (destParentVotes[destListingId] || 0) + 1;
+        }
+      }
+
+      // Pick the dest parent with the most votes (majority)
+      let destParentListingId = null;
+      let maxVotes = 0;
+      for (const [dId, count] of Object.entries(destParentVotes)) {
+        if (count > maxVotes) { maxVotes = count; destParentListingId = dId; }
+      }
+
+      const srcParentMtlId = sp.mtl?._id;
+      if (srcParentMtlId && destParentListingId) {
+        srcParentToDestParent[srcParentMtlId] = destParentListingId;
+      }
+
+      for (const child of children) {
+        const nick = child.nickname || child.title;
+        if (nick && destParentListingId) {
+          srcChildNickToDestParent[nick] = destParentListingId;
+        }
+      }
+
+      srcParentDetails.push({
+        srcParentId: sp._id,
+        srcParentMtlId,
+        srcParentTitle: sp.nickname || sp.title,
+        srcChildCount: children.length,
+        destParentListingId,
+        destParentVotes,
+        children: children.map(c => ({ id: c._id, nick: c.nickname || c.title, mtlP: c.mtl?.p, mtlId: c.mtl?._id })),
+      });
+    }
+
+    logger.info('source-mtl-mapping: source parent → dest parent map built', {
+      migrationId: id, srcParentToDestParent,
+    });
+
+    // ── Step 3: fetch all DEST listings, find orphaned sub-units ───────────
+    logger.info('source-mtl-mapping: fetching all dest listings', { migrationId: id });
+    const destListings = await destClient.getAllListings();
+
+    const destParentMap = {}; // destListingId → { mtlId, title }
+    for (const l of destListings) {
+      if (l.type === 'MTL' && l.mtl?._id) {
+        destParentMap[l._id] = { mtlId: l.mtl._id, title: l.title || l.nickname || l._id };
+      }
+    }
+    const validMtlIds = new Set(Object.values(destParentMap).map(p => p.mtlId));
+
+    // Fetch dest sub-unit details (need mtl.p)
+    const destSubUnitIds = destListings.filter(l => l.type === 'MTL_CHILD').map(l => l._id);
+    logger.info('source-mtl-mapping: fetching dest sub-unit details', { migrationId: id, count: destSubUnitIds.length });
+    const destSubUnits = await destClient.getListingsByIds(destSubUnitIds);
+
+    // Find orphaned ones
+    const orphaned = destSubUnits.filter(s => {
+      const p = s.mtl?.p;
+      return p && !validMtlIds.has(p);
+    });
+    logger.info('source-mtl-mapping: orphaned dest sub-units', { migrationId: id, count: orphaned.length });
+
+    // ── Step 4: resolve each orphaned dest sub-unit ────────────────────────
+    const resolved = [];
+    const unresolved = [];
+
+    for (const sub of orphaned) {
+      const wrongMtlP = sub.mtl?.p; // = old source parent mtl._id
+      const nick = sub.nickname || sub.title;
+
+      // Method A: wrong mtl.p = old source parent mtl._id → look up dest parent
+      let destParentListingId = srcParentToDestParent[wrongMtlP] || null;
+      let matchMethod = destParentListingId ? 'wrong-mtlP-lookup' : null;
+
+      // Method B: nickname match against source children
+      if (!destParentListingId && nick) {
+        destParentListingId = srcChildNickToDestParent[nick] || null;
+        if (destParentListingId) matchMethod = 'nickname-match';
+      }
+
+      const destParentInfo = destParentListingId ? destParentMap[destParentListingId] : null;
+
+      if (destParentListingId && destParentInfo) {
+        resolved.push({
+          destSubUnitId: sub._id,
+          destSubUnitNick: nick,
+          wrongMtlP,
+          destParentListingId,
+          destParentMtlId: destParentInfo.mtlId,
+          destParentTitle: destParentInfo.title,
+          matchMethod,
+        });
+      } else {
+        unresolved.push({
+          destSubUnitId: sub._id,
+          destSubUnitNick: nick,
+          wrongMtlP,
+          destParentListingId: destParentListingId || null,
+          note: destParentListingId && !destParentInfo
+            ? 'destParentListingId found but not in dest parentMap (may be listing ID vs mtl._id mismatch)'
+            : 'no match found',
+        });
+      }
+    }
+
+    logger.info('source-mtl-mapping: resolution complete', {
+      migrationId: id, resolved: resolved.length, unresolved: unresolved.length,
+    });
+
+    res.json({
+      resolved,
+      unresolved,
+      srcParents: srcParentDetails,
+      summary: {
+        srcMtlParents: srcParents.length,
+        destMtlParents: Object.keys(destParentMap).length,
+        orphanedDestSubUnits: orphaned.length,
+        resolved: resolved.length,
+        unresolved: unresolved.length,
+      },
+    });
+  } catch (err) {
+    logger.error('source-mtl-mapping error', { error: err.message, stack: err.stack });
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /api/admin/migrations/:id/tag-cluster-subunits ──────────────────────
 // Fetches all dest listings (with tags) and groups orphaned MTL_CHILD sub-units
 // by their wrong mtl.p value, showing the tag profiles of each group.
