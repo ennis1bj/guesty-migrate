@@ -2151,4 +2151,68 @@ router.get('/users/search', async (req, res) => {
   }
 });
 
+// ── POST /api/admin/migrations/:id/strip-idmap-entries ──────────────────────
+// Removes specific source IDs from a migration's idMap so they will be
+// re-created on the next retry. Used for one-off remediation of orphaned
+// sub-units that need to be re-migrated after manual deletion from Guesty.
+// Body: { sourceIds: string[], resetStatus: boolean }
+
+router.post('/migrations/:id/strip-idmap-entries', async (req, res) => {
+  const { id } = req.params;
+  const { sourceIds, resetStatus = true } = req.body;
+
+  if (!Array.isArray(sourceIds) || sourceIds.length === 0) {
+    return res.status(400).json({ error: 'sourceIds must be a non-empty array' });
+  }
+
+  try {
+    const { rows } = await pool.query(
+      'SELECT results, status, retry_count FROM migrations WHERE id = $1',
+      [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Migration not found' });
+
+    const { results, status, retry_count } = rows[0];
+    const currentIdMap = results?.listings?.idMap || {};
+    const orphanedSet = new Set(sourceIds);
+    const updatedIdMap = Object.fromEntries(
+      Object.entries(currentIdMap).filter(([sid]) => !orphanedSet.has(sid))
+    );
+    const removed = Object.keys(currentIdMap).length - Object.keys(updatedIdMap).length;
+
+    const updatedResults = {
+      ...results,
+      listings: {
+        ...results?.listings,
+        idMap: updatedIdMap,
+        migratedCount: Math.max(0, (results?.listings?.migratedCount || 0) - removed),
+      },
+    };
+
+    const query = resetStatus
+      ? `UPDATE migrations SET results = $1, status = 'paid', error_message = NULL,
+           completed_at = NULL, started_at = NULL, last_progress_at = NULL WHERE id = $2`
+      : `UPDATE migrations SET results = $1 WHERE id = $2`;
+
+    await pool.query(query, [JSON.stringify(updatedResults), id]);
+
+    logger.info('Admin: stripped idMap entries for migration', {
+      migrationId: id, requested: sourceIds.length, removed, resetStatus,
+      statusBefore: status, retryCount: retry_count,
+    });
+
+    res.json({
+      success: true,
+      requested: sourceIds.length,
+      removed,
+      idMapSizeBefore: Object.keys(currentIdMap).length,
+      idMapSizeAfter: Object.keys(updatedIdMap).length,
+      statusReset: resetStatus,
+    });
+  } catch (err) {
+    logger.error('Admin: strip-idmap-entries failed', { error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 module.exports = router;
