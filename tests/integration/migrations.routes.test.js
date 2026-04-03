@@ -1,6 +1,8 @@
 const request = require('supertest');
 const { generateToken } = require('../../server/auth');
 
+jest.mock('express-rate-limit', () => () => (req, res, next) => next());
+
 jest.mock('../../server/db', () => ({
   pool: { query: jest.fn() },
   migrate: jest.fn().mockResolvedValue(undefined),

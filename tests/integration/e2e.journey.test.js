@@ -124,13 +124,15 @@ function makeDbHandler() {
 
     if (/insert\s+into\s+users/i.test(s)) {
       const id = `user-e2e-${++db._uid}`;
-      // Mark is_demo=true so demo-activate bypasses Stripe in the E2E flow
+      // Mark is_demo=true so demo-activate bypasses Stripe in the E2E flow.
+      // email_verified=true so the preflight email-verification guard passes —
+      // we are testing migration logic, not the email-verification flow here.
       const user = {
         id,
         email: params[0],
         password_hash: params[1],
         is_demo: true,
-        email_verified: false,
+        email_verified: true,
         created_at: new Date(),
       };
       db.users.set(id, user);
