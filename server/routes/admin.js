@@ -2159,7 +2159,10 @@ router.get('/users/search', async (req, res) => {
 
 router.post('/migrations/:id/strip-idmap-entries', async (req, res) => {
   const { id } = req.params;
-  const { sourceIds, resetStatus = true } = req.body;
+  // fullIdMap: optional — supply the complete source→dest idMap when the stored
+  // results have been lost (e.g. overwritten by a re-run that skipped listings).
+  // If omitted, the current results.listings.idMap is used as the base.
+  const { sourceIds, resetStatus = true, fullIdMap } = req.body;
 
   if (!Array.isArray(sourceIds) || sourceIds.length === 0) {
     return res.status(400).json({ error: 'sourceIds must be a non-empty array' });
@@ -2173,12 +2176,16 @@ router.post('/migrations/:id/strip-idmap-entries', async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ error: 'Migration not found' });
 
     const { results, status, retry_count } = rows[0];
-    const currentIdMap = results?.listings?.idMap || {};
+    // Use the caller-supplied idMap as the base when results have been wiped,
+    // otherwise fall back to whatever is stored in the DB.
+    const baseIdMap = (fullIdMap && typeof fullIdMap === 'object')
+      ? fullIdMap
+      : (results?.listings?.idMap || {});
     const orphanedSet = new Set(sourceIds);
     const updatedIdMap = Object.fromEntries(
-      Object.entries(currentIdMap).filter(([sid]) => !orphanedSet.has(sid))
+      Object.entries(baseIdMap).filter(([sid]) => !orphanedSet.has(sid))
     );
-    const removed = Object.keys(currentIdMap).length - Object.keys(updatedIdMap).length;
+    const removed = Object.keys(baseIdMap).length - Object.keys(updatedIdMap).length;
 
     const updatedResults = {
       ...results,
@@ -2196,16 +2203,31 @@ router.post('/migrations/:id/strip-idmap-entries', async (req, res) => {
 
     await pool.query(query, [JSON.stringify(updatedResults), id]);
 
+    // Also mark the listings category as 'partial' in migration_logs so the
+    // engine re-enters the creation loop on re-run.  Without this, the engine
+    // sees status='complete' in migration_logs and skips the listings category
+    // entirely, even though we have stripped entries that need to be re-created.
+    if (resetStatus) {
+      await pool.query(
+        `UPDATE migration_logs
+         SET status = 'partial',
+             migrated_count = GREATEST(0, migrated_count - $1)
+         WHERE migration_id = $2 AND category = 'listings' AND status = 'complete'`,
+        [removed, id]
+      );
+    }
+
     logger.info('Admin: stripped idMap entries for migration', {
       migrationId: id, requested: sourceIds.length, removed, resetStatus,
       statusBefore: status, retryCount: retry_count,
+      usedFullIdMap: !!(fullIdMap),
     });
 
     res.json({
       success: true,
       requested: sourceIds.length,
       removed,
-      idMapSizeBefore: Object.keys(currentIdMap).length,
+      idMapSizeBefore: Object.keys(baseIdMap).length,
       idMapSizeAfter: Object.keys(updatedIdMap).length,
       statusReset: resetStatus,
     });
