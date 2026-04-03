@@ -1,0 +1,120 @@
+##############################################################################
+# Cloud Run service definition — guesty-migrate (main app)
+#
+# Deploy / update with:
+#   gcloud run services replace deploy/main-app.cloudrun.yaml \
+#     --region us-central1
+#
+# Replace IMAGE_TAG with the actual $SHORT_SHA from Cloud Build, or "latest".
+# Replace PROJECT_ID, REGION, and REPO with your values before deploying.
+##############################################################################
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: guesty-migrate
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        # Keep at least one instance warm so the BullMQ worker is always running
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "10"
+        # VPC connector — required to reach Memorystore (private IP only).
+        # Replace CONNECTOR_NAME with the name you created in deploy/README.md.
+        run.googleapis.com/vpc-access-connector: projects/PROJECT_ID/locations/REGION/connectors/CONNECTOR_NAME
+        run.googleapis.com/vpc-access-egress: private-ranges-only
+    spec:
+      serviceAccountName: guesty-migrate-sa@PROJECT_ID.iam.gserviceaccount.com
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/REPO/guesty-migrate:IMAGE_TAG
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          env:
+            # ── Non-secret runtime config ─────────────────────────────────
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "8080"
+            # DB_SSL=true — required for Cloud SQL
+            - name: DB_SSL
+              value: "true"
+            # FRONTEND_URL — comma-separated list of allowed CORS origins.
+            # Include your Cloud Run URL and any custom domain.
+            # Example: https://guesty-migrate-xyz-uc.a.run.app,https://app.guestymigrate.com
+            - name: FRONTEND_URL
+              value: https://YOUR_CLOUD_RUN_URL,https://YOUR_CUSTOM_DOMAIN
+            # ── Secrets from Secret Manager ───────────────────────────────
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: DATABASE_URL
+                  key: latest
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: JWT_SECRET
+                  key: latest
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ENCRYPTION_KEY
+                  key: latest
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: REDIS_URL
+                  key: latest
+            - name: STRIPE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: STRIPE_SECRET_KEY
+                  key: latest
+            - name: STRIPE_PUBLISHABLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: STRIPE_PUBLISHABLE_KEY
+                  key: latest
+            - name: STRIPE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: STRIPE_WEBHOOK_SECRET
+                  key: latest
+            - name: RESEND_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: RESEND_API_KEY
+                  key: latest
+            - name: FROM_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: FROM_EMAIL
+                  key: latest
+            - name: ADMIN_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: ADMIN_EMAIL
+                  key: latest
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ADMIN_PASSWORD
+                  key: latest
+            - name: OPERATORDECK_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: OPERATORDECK_HOST
+                  key: latest
+            - name: OPERATORDECK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: OPERATORDECK_TOKEN
+                  key: latest

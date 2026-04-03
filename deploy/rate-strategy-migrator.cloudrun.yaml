@@ -1,0 +1,83 @@
+##############################################################################
+# Cloud Run service definition — guesty-rate-strategy-migrator
+#
+# Deploy / update with:
+#   gcloud run services replace deploy/rate-strategy-migrator.cloudrun.yaml \
+#     --region us-central1
+#
+# Replace IMAGE_TAG with the actual $SHORT_SHA from Cloud Build, or "latest".
+#
+# IMPORTANT — Memorystore (Redis) requires a Serverless VPC Access Connector.
+# Set the connector name in the annotation below before deploying.
+# See deploy/README.md for setup instructions.
+##############################################################################
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: guesty-rate-strategy-migrator
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        # Keep at least one instance warm so the Bull worker is always running
+        autoscaling.knative.dev/minScale: "1"
+        # Limit to 2 instances — Playwright is CPU/memory intensive
+        autoscaling.knative.dev/maxScale: "2"
+        # VPC connector — required to reach Memorystore (private IP only).
+        # Replace CONNECTOR_NAME with the name you created in deploy/README.md.
+        run.googleapis.com/vpc-access-connector: projects/PROJECT_ID/locations/REGION/connectors/CONNECTOR_NAME
+        run.googleapis.com/vpc-access-egress: private-ranges-only
+    spec:
+      serviceAccountName: guesty-migrate-sa@PROJECT_ID.iam.gserviceaccount.com
+      # Process one migration at a time per instance (Playwright singleton)
+      containerConcurrency: 1
+      timeoutSeconds: 3600   # 1 hour — individual migration jobs can take ~10 min
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/REPO/guesty-rate-strategy-migrator:IMAGE_TAG
+          ports:
+            - containerPort: 3000
+          resources:
+            limits:
+              # Playwright + Chromium requires at least 2 GB RAM
+              cpu: "2"
+              memory: 2Gi
+          env:
+            # ── Non-secret runtime config ─────────────────────────────────
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "3000"
+            - name: HEADLESS
+              value: "true"
+            - name: BROWSER_TIMEOUT_MS
+              value: "15000"
+            - name: JOB_TIMEOUT_MS
+              value: "600000"
+            - name: LOG_LEVEL
+              value: info
+            - name: ENABLE_UI_VALIDATION
+              value: "false"
+            - name: GUESTY_APP_URL
+              value: https://app.guesty.com
+            # DB_SSL=true — required for Cloud SQL
+            - name: DB_SSL
+              value: "true"
+            # ── Secrets from Secret Manager ───────────────────────────────
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: DATABASE_URL
+                  key: latest
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: REDIS_URL
+                  key: latest
+            - name: PAYLOAD_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: PAYLOAD_ENCRYPTION_KEY
+                  key: latest

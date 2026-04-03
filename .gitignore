@@ -12,3 +12,7 @@ playwright-report/
 # Replit artifacts
 .replit
 replit.md
+
+# Agent-internal task files and pasted assets — never commit to GitHub
+.local/
+attached_assets/

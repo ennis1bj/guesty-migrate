@@ -55,15 +55,27 @@ app.use((req, res, next) => {
   next();
 });
 
-// CORS — restrict to FRONTEND_URL in production; explicit localhost allowlist in dev
+// CORS — restrict to FRONTEND_URL in production; explicit localhost allowlist in dev.
+// FRONTEND_URL may be a comma-separated list of origins (e.g. for GCP where a staging
+// Cloud Run URL and a custom domain both need to be allowed simultaneously).
 const isProd = process.env.NODE_ENV === 'production';
 const isDev = process.env.NODE_ENV === 'development';
+
+function buildCorsOrigin() {
+  if (isProd) {
+    const raw = process.env.FRONTEND_URL || '';
+    if (!raw) return false;
+    const origins = raw.split(',').map((o) => o.trim()).filter(Boolean);
+    return origins.length === 1 ? origins[0] : origins;
+  }
+  if (isDev) {
+    return ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173'];
+  }
+  return false; // NODE_ENV not set — deny by default for safety
+}
+
 app.use(cors({
-  origin: isProd
-    ? (process.env.FRONTEND_URL || false)
-    : isDev
-      ? ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173']
-      : false,  // NODE_ENV not set — deny by default for safety
+  origin: buildCorsOrigin(),
   credentials: true,
 }));
 

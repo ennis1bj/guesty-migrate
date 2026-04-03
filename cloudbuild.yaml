@@ -1,0 +1,88 @@
+##############################################################################
+# Cloud Build pipeline — GuestyMigrate
+#
+# Builds and pushes two Docker images to Artifact Registry on every push:
+#   1. guesty-migrate          (main Express + React app)
+#   2. guesty-rate-strategy-migrator  (Playwright microservice)
+#
+# Substitution variables (set in Cloud Build trigger or passed via CLI):
+#   _REGION   — GCP region, e.g. us-central1
+#   _REPO     — Artifact Registry repo name, e.g. guesty-migrate
+#   _PROJECT  — GCP project ID (defaults to $PROJECT_ID, the built-in variable)
+#
+# Usage (manual trigger):
+#   gcloud builds submit \
+#     --config cloudbuild.yaml \
+#     --substitutions _REGION=us-central1,_REPO=guesty-migrate .
+##############################################################################
+
+substitutions:
+  _REGION: us-central1
+  _REPO: guesty-migrate
+  # _PROJECT intentionally not listed here — use the built-in $PROJECT_ID
+
+options:
+  # Allow both build steps to execute concurrently
+  machineType: E2_HIGHCPU_8
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  # ── Step 1a: Build main app image ──────────────────────────────────────────
+  - id: build-main-app
+    name: gcr.io/cloud-builders/docker
+    waitFor: ['-']   # start immediately (parallel with step 1b)
+    args:
+      - build
+      - --tag
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/guesty-migrate:$SHORT_SHA
+      - --tag
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/guesty-migrate:latest
+      - --cache-from
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/guesty-migrate:latest
+      - --file
+      - Dockerfile
+      - .
+
+  # ── Step 1b: Build rate-strategy-migrator image ────────────────────────────
+  # Note: base image is ~1.5 GB (Playwright + Chromium). First build takes
+  # 8–12 minutes; subsequent builds benefit from layer caching.
+  - id: build-migrator
+    name: gcr.io/cloud-builders/docker
+    waitFor: ['-']   # start immediately (parallel with step 1a)
+    args:
+      - build
+      - --tag
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/guesty-rate-strategy-migrator:$SHORT_SHA
+      - --tag
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/guesty-rate-strategy-migrator:latest
+      - --cache-from
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/guesty-rate-strategy-migrator:latest
+      - --file
+      - guesty-rate-strategy-migrator/Dockerfile
+      - guesty-rate-strategy-migrator
+
+  # ── Step 2a: Push main app image ───────────────────────────────────────────
+  - id: push-main-app
+    name: gcr.io/cloud-builders/docker
+    waitFor: [build-main-app]
+    args:
+      - push
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/guesty-migrate
+
+  # ── Step 2b: Push migrator image ───────────────────────────────────────────
+  - id: push-migrator
+    name: gcr.io/cloud-builders/docker
+    waitFor: [build-migrator]
+    args:
+      - push
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/guesty-rate-strategy-migrator
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/guesty-migrate:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/guesty-migrate:latest
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/guesty-rate-strategy-migrator:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/guesty-rate-strategy-migrator:latest
+
+timeout: 1800s   # 30-minute build timeout (Playwright base image is large)
