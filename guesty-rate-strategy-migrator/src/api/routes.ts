@@ -54,10 +54,10 @@ router.post('/', postLimiter, async (req: Request, res: Response): Promise<void>
   const payload: MigrationJobPayload = {
     jobId,
     sourceCredentials: {
-      encryptedEmail:    encrypt(sourceEmail),
-      encryptedPassword: encrypt(sourcePassword),
-      clientId:          sourceClientId,
-      clientSecret:      sourceClientSecret,
+      encryptedEmail:        encrypt(sourceEmail),
+      encryptedPassword:     encrypt(sourcePassword),
+      encryptedClientId:     encrypt(sourceClientId),
+      encryptedClientSecret: encrypt(sourceClientSecret),
     },
     destCredentials: {
       encryptedEmail:    encrypt(destEmail),

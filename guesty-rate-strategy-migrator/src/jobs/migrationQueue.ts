@@ -3,13 +3,19 @@ import { logger } from '../utils/logger';
 
 // ── Job payload types ─────────────────────────────────────────────────────────
 
+/**
+ * All credential fields in the queued payload are AES-256-GCM encrypted
+ * (including clientId and clientSecret) so the Redis queue never holds
+ * plaintext secrets. Decryption happens in-memory inside the worker,
+ * immediately before use.
+ */
 export interface MigrationJobPayload {
   jobId: string;
   sourceCredentials: {
     encryptedEmail: string;
     encryptedPassword: string;
-    clientId: string;
-    clientSecret: string;
+    encryptedClientId: string;
+    encryptedClientSecret: string;
   };
   destCredentials: {
     encryptedEmail: string;

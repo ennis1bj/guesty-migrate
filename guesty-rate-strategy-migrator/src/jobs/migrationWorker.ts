@@ -8,7 +8,7 @@ import {
   closeBrowser,
 } from '../utils/browser';
 import { fetchRateStrategies } from '../api-client/guestyOpenApi';
-import { loginToGuesty, LoginFailedError } from '../migrator/guestyAuth';
+import { loginToGuesty } from '../migrator/guestyAuth';
 import { validateWithUI } from '../migrator/extractStrategies';
 import { createStrategies, PartialMigrationError } from '../migrator/createStrategies';
 import { updateJobRecord } from '../db/jobRepository';
@@ -32,41 +32,40 @@ async function processJob(job: Bull.Job<MigrationJobPayload>): Promise<void> {
   const startedAt = Date.now();
   jobLog.info('Migration job started');
 
-  await updateJobRecord(jobId, { status: 'running' });
+  // Mark running immediately so status is visible even if subsequent steps throw
+  await updateJobRecord(jobId, { status: 'running' }).catch((dbErr: Error) => {
+    jobLog.warn({ error: dbErr.message }, 'Could not mark job as running in DB — proceeding');
+  });
 
-  // Decrypt credentials in-memory — never stored to disk or DB
-  const sourceEmail    = decrypt(sourceCredentials.encryptedEmail);
-  const sourcePassword = decrypt(sourceCredentials.encryptedPassword);
-  const destEmail      = decrypt(destCredentials.encryptedEmail);
-  const destPassword   = decrypt(destCredentials.encryptedPassword);
-
-  // Fetch source strategies via Guesty Open API
-  jobLog.info('Fetching rate strategies from source account via Open API');
-  const strategies = await fetchRateStrategies(
-    sourceCredentials.clientId,
-    sourceCredentials.clientSecret
-  );
-
-  if (strategies.length === 0) {
-    const err = new StrategyNotFoundError();
-    await updateJobRecord(jobId, {
-      status: 'failed',
-      completedAt: new Date().toISOString(),
-      strategyCount: 0,
-      errors: [{ strategyName: '__job__', error: err.message }],
-      durationMs: Date.now() - startedAt,
-    });
-    throw err;
-  }
-
-  jobLog.info({ count: strategies.length }, 'Rate strategies fetched');
-  await updateJobRecord(jobId, { strategyCount: strategies.length });
-
-  const sourceContext = await createIsolatedContext();
-  const destContext   = await createIsolatedContext();
+  // Browser contexts declared outside try so finally can close them
+  let sourceContext: Awaited<ReturnType<typeof createIsolatedContext>> | null = null;
+  let destContext:   Awaited<ReturnType<typeof createIsolatedContext>> | null = null;
 
   try {
-    // Optional: UI validation cross-check on source account
+    // ── Decrypt all credentials in-memory — never written to disk or DB ─────
+    const sourceEmail         = decrypt(sourceCredentials.encryptedEmail);
+    const sourcePassword      = decrypt(sourceCredentials.encryptedPassword);
+    const sourceClientId      = decrypt(sourceCredentials.encryptedClientId);
+    const sourceClientSecret  = decrypt(sourceCredentials.encryptedClientSecret);
+    const destEmail           = decrypt(destCredentials.encryptedEmail);
+    const destPassword        = decrypt(destCredentials.encryptedPassword);
+
+    // ── Fetch source strategies via Guesty Open API ──────────────────────────
+    jobLog.info('Fetching rate strategies from source account via Open API');
+    const strategies = await fetchRateStrategies(sourceClientId, sourceClientSecret);
+
+    if (strategies.length === 0) {
+      throw new StrategyNotFoundError();
+    }
+
+    jobLog.info({ count: strategies.length }, 'Rate strategies fetched');
+    await updateJobRecord(jobId, { strategyCount: strategies.length }).catch(() => {});
+
+    // ── Create browser contexts ──────────────────────────────────────────────
+    sourceContext = await createIsolatedContext();
+    destContext   = await createIsolatedContext();
+
+    // ── Optional: UI validation cross-check on source account ───────────────
     if (process.env.ENABLE_UI_VALIDATION === 'true') {
       jobLog.info('Authenticating to source account for UI validation');
       const sourcePage = await loginToGuesty(sourceContext, {
@@ -76,14 +75,14 @@ async function processJob(job: Bull.Job<MigrationJobPayload>): Promise<void> {
       await validateWithUI(sourcePage, strategies, jobLog);
     }
 
-    // Authenticate to destination account
+    // ── Authenticate to destination account ──────────────────────────────────
     jobLog.info('Authenticating to destination account');
     const destPage = await loginToGuesty(destContext, {
       email: destEmail,
       password: destPassword,
     });
 
-    // Recreate strategies in destination account via UI automation
+    // ── Recreate strategies in destination account via UI automation ─────────
     jobLog.info({ count: strategies.length }, 'Creating strategies in destination account');
     const { successCount, failureCount, errors } = await createStrategies(
       destPage,
@@ -91,11 +90,11 @@ async function processJob(job: Bull.Job<MigrationJobPayload>): Promise<void> {
       jobLog
     );
 
-    const durationMs   = Date.now() - startedAt;
-    const finalStatus  =
-      failureCount === 0              ? 'completed' :
-      successCount === 0              ? 'failed'    :
-      /* some passed, some failed */    'partial';
+    const durationMs  = Date.now() - startedAt;
+    const finalStatus =
+      failureCount === 0  ? 'completed'
+      : successCount === 0 ? 'failed'
+      :                      'partial';
 
     await updateJobRecord(jobId, {
       status: finalStatus,
@@ -108,29 +107,34 @@ async function processJob(job: Bull.Job<MigrationJobPayload>): Promise<void> {
 
     jobLog.info({ successCount, failureCount, durationMs }, 'Migration job complete');
 
+    // Throw so Bull records the job as failed — DB already has the partial record
     if (failureCount > 0) {
       throw new PartialMigrationError(successCount, failureCount, errors);
     }
   } catch (err) {
-    // PartialMigrationError is already recorded above — just rethrow
+    // PartialMigrationError: DB is already up to date — just rethrow for Bull
     if (err instanceof PartialMigrationError) throw err;
 
-    // All other errors: capture screenshot + record failure
-    await captureFailureScreenshot(destContext, jobId);
+    // Capture failure screenshot before closing the dest context
+    if (destContext) {
+      await captureFailureScreenshot(destContext, jobId).catch(() => {});
+    }
 
-    const durationMs = Date.now() - startedAt;
+    // Always write a terminal status so the row never stays 'running'
     await updateJobRecord(jobId, {
       status: 'failed',
       completedAt: new Date().toISOString(),
       errors: [{ strategyName: '__job__', error: (err as Error).message }],
-      durationMs,
-    }).catch(() => {});
+      durationMs: Date.now() - startedAt,
+    }).catch((dbErr: Error) => {
+      jobLog.error({ error: dbErr.message }, 'Could not write failed status to DB');
+    });
 
     throw err;
   } finally {
-    // Always close contexts regardless of outcome
-    await sourceContext.close().catch(() => {});
-    await destContext.close().catch(() => {});
+    // Always close browser contexts regardless of outcome
+    if (sourceContext) await sourceContext.close().catch(() => {});
+    if (destContext)   await destContext.close().catch(() => {});
   }
 }
 
@@ -140,14 +144,14 @@ async function processJob(job: Bull.Job<MigrationJobPayload>): Promise<void> {
  * Starts the Bull queue worker. Processes one job at a time (concurrency = 1)
  * to ensure the singleton Chromium browser is not overloaded.
  *
- * Also starts the screenshot cleanup cron.
+ * Also starts the 24-hour failure screenshot cleanup cron.
  */
 export function startWorker(): void {
   startScreenshotCleanup();
 
   const queue = getMigrationQueue();
 
-  // Process 1 job at a time — Playwright browser is a singleton
+  // Process 1 job at a time — Playwright browser is a singleton resource
   queue.process(1, processJob);
 
   queue.on('completed', (job) => {
