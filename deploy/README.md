@@ -86,6 +86,36 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
 
 ## Step 4 — Create Cloud SQL (PostgreSQL 15)
 
+Cloud SQL is created with a **private IP only** (`--no-assign-ip`). Private IP requires allocating a VPC peering range and enabling the Service Networking API first. Run all three blocks below in order.
+
+**4a — Allocate a private IP range for Google-managed services:**
+
+```bash
+# Use the same VPC network you will create for the VPC connector in Step 6.
+# If you haven't created it yet, create it now:
+gcloud compute networks create guesty-migrate-vpc \
+  --subnet-mode=auto
+
+# Allocate a /24 range for Google service peering in that VPC
+gcloud compute addresses create google-managed-services-guesty-migrate-vpc \
+  --global \
+  --purpose=VPC_PEERING \
+  --prefix-length=24 \
+  --network=guesty-migrate-vpc
+```
+
+**4b — Enable private service connection (VPC peering to Google services):**
+
+```bash
+gcloud services vpc-peerings connect \
+  --service=servicenetworking.googleapis.com \
+  --ranges=google-managed-services-guesty-migrate-vpc \
+  --network=guesty-migrate-vpc \
+  --project=$PROJECT_ID
+```
+
+**4c — Create the Cloud SQL instance with private IP:**
+
 ```bash
 gcloud sql instances create guesty-migrate-db \
   --database-version=POSTGRES_15 \
@@ -93,10 +123,13 @@ gcloud sql instances create guesty-migrate-db \
   --region=$REGION \
   --storage-auto-increase \
   --backup-start-time=03:00 \
-  --no-assign-ip
+  --no-assign-ip \
+  --network=guesty-migrate-vpc
 ```
 
-> `--no-assign-ip` keeps the instance private. Cloud Run connects via the Cloud SQL Auth Proxy Unix socket injected by the `run.googleapis.com/cloudsql-instances` annotation in the Cloud Run YAML — no public IP or SSL config needed.
+> With `--no-assign-ip` and `--network`, the instance gets a private IP on `guesty-migrate-vpc` and no public interface. Cloud Run connects via the Cloud SQL Auth Proxy Unix socket injected by the `run.googleapis.com/cloudsql-instances` annotation — no TLS config needed.
+>
+> **Note:** If you prefer a simpler setup during testing, omit `--no-assign-ip` and `--network` to give the instance a public IP, then add `?sslmode=require` to the DATABASE_URL and keep `DB_SSL=true` in the Cloud Run YAML. Remove the `cloudsql-instances` annotation and use a direct TCP connection string instead. Switch to the private IP approach for production.
 
 Create the database and user:
 
@@ -159,12 +192,9 @@ redis://10.0.0.3:6379
 
 ## Step 6 — Create Serverless VPC Access Connector
 
-This is required for Cloud Run → Memorystore (private IP) connectivity.
+This is required for Cloud Run → Memorystore (private IP) connectivity. The `guesty-migrate-vpc` network was already created in Step 4a.
 
 ```bash
-gcloud compute networks create guesty-migrate-vpc \
-  --subnet-mode=auto
-
 gcloud vpc-access connectors create guesty-migrate-connector \
   --region=$REGION \
   --network=guesty-migrate-vpc \
