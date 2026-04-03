@@ -3,7 +3,7 @@
 This guide walks through deploying the full GuestyMigrate stack to Google Cloud Platform using:
 
 - **Cloud Run** — containerised services (main app + rate strategy migrator)
-- **Cloud SQL** — managed PostgreSQL 15
+- **Cloud SQL** — managed PostgreSQL 15 (Auth Proxy via Unix socket)
 - **Memorystore** — managed Redis 7
 - **Artifact Registry** — Docker image storage
 - **Secret Manager** — environment variable secrets
@@ -76,7 +76,7 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
   --member="serviceAccount:${SA}" \
   --role="roles/secretmanager.secretAccessor"
 
-# Allow Cloud Run to connect to Cloud SQL
+# Allow Cloud Run to connect to Cloud SQL via Auth Proxy
 gcloud projects add-iam-policy-binding $PROJECT_ID \
   --member="serviceAccount:${SA}" \
   --role="roles/cloudsql.client"
@@ -93,8 +93,10 @@ gcloud sql instances create guesty-migrate-db \
   --region=$REGION \
   --storage-auto-increase \
   --backup-start-time=03:00 \
-  --require-ssl
+  --no-assign-ip
 ```
+
+> `--no-assign-ip` keeps the instance private. Cloud Run connects via the Cloud SQL Auth Proxy Unix socket injected by the `run.googleapis.com/cloudsql-instances` annotation in the Cloud Run YAML — no public IP or SSL config needed.
 
 Create the database and user:
 
@@ -108,21 +110,21 @@ gcloud sql users create guesty_app \
   --password=CHOOSE_A_STRONG_PASSWORD
 ```
 
-Get the instance connection string (used in DATABASE_URL):
+Get the instance connection name (used in DATABASE_URL and the Cloud Run YAML):
 
 ```bash
 gcloud sql instances describe guesty-migrate-db \
   --format="value(connectionName)"
-# Output format: PROJECT_ID:REGION:guesty-migrate-db
+# Output: PROJECT_ID:REGION:guesty-migrate-db
 ```
 
-The `DATABASE_URL` for Cloud SQL via TCP with SSL:
+The `DATABASE_URL` secret value (Unix socket via Auth Proxy):
 
 ```
-postgresql://guesty_app:PASSWORD@/guesty_migrate?host=/cloudsql/PROJECT_ID:REGION:guesty-migrate-db&sslmode=require
+postgresql://guesty_app:PASSWORD@/guesty_migrate?host=/cloudsql/PROJECT_ID:REGION:guesty-migrate-db
 ```
 
-> **Tip:** Cloud Run can connect to Cloud SQL via the Cloud SQL Auth Proxy sidecar (recommended) or via a public IP with SSL. The simplest approach for Cloud Run is to use the Unix socket path shown above — the Cloud SQL Auth Proxy is automatically injected when `DB_SSL=true` and the `cloudsql.googleapis.com` annotation is present. Alternatively, use a direct TCP connection string and set `DB_SSL=true`.
+> **How it works:** The `run.googleapis.com/cloudsql-instances: PROJECT_ID:REGION:guesty-migrate-db` annotation in both Cloud Run YAML files tells Cloud Run to inject the Cloud SQL Auth Proxy as a sidecar. The proxy creates a Unix socket at `/cloudsql/PROJECT_ID:REGION:guesty-migrate-db` that the app connects to via the URL above. No TLS or public IP is needed — the proxy handles secure communication internally.
 
 ---
 
@@ -174,25 +176,24 @@ gcloud vpc-access connectors describe guesty-migrate-connector \
   --format="value(state)"
 ```
 
-Note the connector's full resource name for the Cloud Run YAML files:
+The connector's full resource name (used in the Cloud Run YAML annotations):
 
 ```
 projects/PROJECT_ID/locations/REGION/connectors/guesty-migrate-connector
 ```
 
-Update both YAML files (`deploy/main-app.cloudrun.yaml` and `deploy/rate-strategy-migrator.cloudrun.yaml`) — replace the `CONNECTOR_NAME` placeholder with `guesty-migrate-connector` and `PROJECT_ID`/`REGION` with your values.
-
 ---
 
 ## Step 7 — Create Secret Manager secrets
 
-> **CRITICAL — `ENCRYPTION_KEY`:** If you are migrating from an existing Replit production deployment, you **must** use the same `ENCRYPTION_KEY` value that was used there. All Guesty credentials stored in the database are encrypted with this key. Using a different key will make all stored credentials permanently unreadable.
+> **CRITICAL — `ENCRYPTION_KEY`:** If you are migrating from an existing Replit production deployment, you **must** use the same `ENCRYPTION_KEY` value. All Guesty credentials stored in the database are encrypted with this key. Using a different key will make all stored credentials permanently unreadable.
 
-Create each secret with the command below, substituting the actual value:
+> **IMPORTANT — All referenced secrets must exist:** Cloud Run will refuse to start a revision if any secret referenced in the YAML is missing from Secret Manager. For optional features you are not using (e.g. Stripe, Resend, OperatorDeck), create the secret with a placeholder value rather than removing it from the YAML.
+
+**Required secrets:**
 
 ```bash
-# Required
-echo -n "postgresql://guesty_app:PASSWORD@/guesty_migrate?host=..." \
+echo -n "postgresql://guesty_app:PASSWORD@/guesty_migrate?host=/cloudsql/PROJECT_ID:REGION:guesty-migrate-db" \
   | gcloud secrets create DATABASE_URL --data-file=-
 
 echo -n "redis://10.0.0.3:6379" \
@@ -205,40 +206,30 @@ echo -n "your-64-hex-char-jwt-secret" \
 echo -n "your-32-byte-hex-encryption-key" \
   | gcloud secrets create ENCRYPTION_KEY --data-file=-
 
-# Rate strategy migrator encryption key (separate from main app key)
+# Rate strategy migrator encryption key (may differ from main app key)
 echo -n "your-32-byte-hex-payload-encryption-key" \
   | gcloud secrets create PAYLOAD_ENCRYPTION_KEY --data-file=-
+```
 
-# Optional — Stripe (payments disabled if absent)
-echo -n "sk_live_..." \
-  | gcloud secrets create STRIPE_SECRET_KEY --data-file=-
+**Optional secrets (create with real values or "disabled" placeholder):**
 
-echo -n "pk_live_..." \
-  | gcloud secrets create STRIPE_PUBLISHABLE_KEY --data-file=-
+```bash
+# Stripe — payments disabled if set to "disabled"
+echo -n "sk_live_..." | gcloud secrets create STRIPE_SECRET_KEY --data-file=-
+echo -n "pk_live_..." | gcloud secrets create STRIPE_PUBLISHABLE_KEY --data-file=-
+echo -n "whsec_..."  | gcloud secrets create STRIPE_WEBHOOK_SECRET --data-file=-
 
-echo -n "whsec_..." \
-  | gcloud secrets create STRIPE_WEBHOOK_SECRET --data-file=-
-
-# Optional — Email (Resend)
-echo -n "re_..." \
-  | gcloud secrets create RESEND_API_KEY --data-file=-
-
-echo -n "noreply@yourdomain.com" \
-  | gcloud secrets create FROM_EMAIL --data-file=-
+# Email via Resend — emails disabled if set to "disabled"
+echo -n "re_..."     | gcloud secrets create RESEND_API_KEY --data-file=-
+echo -n "noreply@yourdomain.com" | gcloud secrets create FROM_EMAIL --data-file=-
 
 # Admin account
-echo -n "admin@yourdomain.com" \
-  | gcloud secrets create ADMIN_EMAIL --data-file=-
+echo -n "admin@yourdomain.com"   | gcloud secrets create ADMIN_EMAIL --data-file=-
+echo -n "your-admin-password"    | gcloud secrets create ADMIN_PASSWORD --data-file=-
 
-echo -n "your-admin-password" \
-  | gcloud secrets create ADMIN_PASSWORD --data-file=-
-
-# OperatorDeck monitoring (optional)
-echo -n "https://your-operatordeck-host" \
-  | gcloud secrets create OPERATORDECK_HOST --data-file=-
-
-echo -n "your-operatordeck-token" \
-  | gcloud secrets create OPERATORDECK_TOKEN --data-file=-
+# OperatorDeck monitoring — disabled if set to "disabled"
+echo -n "https://your-operatordeck-host" | gcloud secrets create OPERATORDECK_HOST --data-file=-
+echo -n "your-operatordeck-token"        | gcloud secrets create OPERATORDECK_TOKEN --data-file=-
 ```
 
 Grant the service account access to each secret:
@@ -261,7 +252,7 @@ done
 1. Open the [Cloud Build triggers page](https://console.cloud.google.com/cloud-build/triggers) in the GCP Console.
 2. Click **Connect repository**.
 3. Select **GitHub (Cloud Build GitHub App)** and authenticate.
-4. Choose your repository (`guesty-migrate` or similar).
+4. Choose your repository.
 5. Click **Create a trigger**:
    - **Event:** Push to a branch
    - **Branch:** `^main$` (or your default branch)
@@ -276,53 +267,41 @@ From this point, every push to `main` automatically builds and pushes both Docke
 
 ## Step 9 — Update the Cloud Run YAML files
 
-Before deploying, edit both YAML files and replace all placeholder values:
+Before deploying, open both `deploy/main-app.cloudrun.yaml` and `deploy/rate-strategy-migrator.cloudrun.yaml` and replace all placeholder values:
 
 | Placeholder | Replace with |
 |---|---|
 | `PROJECT_ID` | Your GCP project ID |
 | `REGION` | Your GCP region (e.g. `us-central1`) |
-| `REPO` | `guesty-migrate` (or your Artifact Registry repo name) |
-| `IMAGE_TAG` | `latest` for first deploy; use `$SHORT_SHA` in automation |
+| `REPO` | `guesty-migrate` |
+| `IMAGE_TAG` | `latest` for first deploy |
 | `CONNECTOR_NAME` | `guesty-migrate-connector` |
-| `YOUR_CLOUD_RUN_URL` | The Cloud Run URL (available after first deploy) |
-| `YOUR_CUSTOM_DOMAIN` | Your custom domain, if any |
 
-In `deploy/main-app.cloudrun.yaml`, update `FRONTEND_URL` to include both your Cloud Run URL and your custom domain (comma-separated):
-
-```yaml
-- name: FRONTEND_URL
-  value: https://guesty-migrate-abc123-uc.a.run.app,https://app.yourdomain.com
-```
+In `deploy/main-app.cloudrun.yaml`, update `FRONTEND_URL` to include your Cloud Run URL and custom domain (comma-separated). You will get the Cloud Run URL after the first deploy in Step 10; you may need to deploy once, then update the secret and redeploy.
 
 ---
 
 ## Step 10 — Deploy to Cloud Run
-
-**First deploy** (before the Cloud Run URL is known — deploy with the placeholder URL, then update `FRONTEND_URL` after):
 
 ```bash
 # Deploy main app
 gcloud run services replace deploy/main-app.cloudrun.yaml \
   --region $REGION
 
-# Get the Cloud Run URL
-gcloud run services describe guesty-migrate \
-  --region $REGION \
-  --format="value(status.url)"
+# Get the assigned Cloud Run URL
+MAIN_URL=$(gcloud run services describe guesty-migrate \
+  --region $REGION --format="value(status.url)")
+echo "Main app URL: $MAIN_URL"
 
-# Update FRONTEND_URL secret with the actual URL, then redeploy
-echo -n "https://guesty-migrate-xyz-uc.a.run.app" \
-  | gcloud secrets versions add FRONTEND_URL --data-file=- 2>/dev/null || \
-  echo -n "https://guesty-migrate-xyz-uc.a.run.app" \
-  | gcloud secrets create FRONTEND_URL --data-file=-
+# Update FRONTEND_URL in the YAML to use the real URL, then redeploy
+# (or set it as an env var override via gcloud run services update)
 
 # Deploy rate strategy migrator
 gcloud run services replace deploy/rate-strategy-migrator.cloudrun.yaml \
   --region $REGION
 ```
 
-Make both services public (allow unauthenticated HTTP):
+Make both services publicly accessible:
 
 ```bash
 gcloud run services add-iam-policy-binding guesty-migrate \
@@ -336,7 +315,7 @@ gcloud run services add-iam-policy-binding guesty-rate-strategy-migrator \
   --role="roles/run.invoker"
 ```
 
-**Subsequent deploys** (after CI/CD is set up) are triggered automatically by pushing to `main`. To deploy manually after Cloud Build pushes a new image:
+**Subsequent deploys** are triggered automatically by pushing to `main` (Cloud Build builds → pushes → you trigger `services replace`). To update the running image without editing the YAML:
 
 ```bash
 gcloud run services update guesty-migrate \
@@ -353,25 +332,25 @@ gcloud run services update guesty-rate-strategy-migrator \
 ## Step 11 — Verify the deployment
 
 ```bash
-# Health check — main app
-curl https://$(gcloud run services describe guesty-migrate \
-  --region $REGION --format="value(status.url)")/api/health
+# Health check — main app (also verifies DB connectivity)
+curl ${MAIN_URL}/api/health
 
 # Health check — rate strategy migrator
-curl https://$(gcloud run services describe guesty-rate-strategy-migrator \
-  --region $REGION --format="value(status.url)")/health
+MIGRATOR_URL=$(gcloud run services describe guesty-rate-strategy-migrator \
+  --region $REGION --format="value(status.url)")
+curl ${MIGRATOR_URL}/health
 ```
 
-Both should return `{"status":"ok",...}`.
+Both should return `{"status":"ok",...}`. The main app health check queries the database, so a successful response confirms Cloud SQL Auth Proxy connectivity.
 
 ---
 
 ## Step 12 — Stripe webhook update
 
-After deploying, update your Stripe webhook endpoint in the [Stripe Dashboard](https://dashboard.stripe.com/webhooks) to point to the new Cloud Run URL:
+After deploying, update your Stripe webhook endpoint in the [Stripe Dashboard](https://dashboard.stripe.com/webhooks):
 
 ```
-https://guesty-migrate-xyz-uc.a.run.app/api/webhooks/stripe
+https://YOUR_CLOUD_RUN_URL/api/webhooks/stripe
 ```
 
 ---

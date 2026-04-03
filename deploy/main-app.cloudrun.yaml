@@ -5,8 +5,22 @@
 #   gcloud run services replace deploy/main-app.cloudrun.yaml \
 #     --region us-central1
 #
-# Replace IMAGE_TAG with the actual $SHORT_SHA from Cloud Build, or "latest".
-# Replace PROJECT_ID, REGION, and REPO with your values before deploying.
+# Before deploying, replace ALL placeholder values:
+#   PROJECT_ID   — your GCP project ID
+#   REGION       — your GCP region (e.g. us-central1)
+#   REPO         — your Artifact Registry repo name (e.g. guesty-migrate)
+#   IMAGE_TAG    — image tag from Cloud Build ($SHORT_SHA or "latest")
+#   CONNECTOR_NAME — your Serverless VPC Access connector name
+#
+# DATABASE_URL format for Cloud SQL Auth Proxy (Unix socket):
+#   postgresql://guesty_app:PASSWORD@/guesty_migrate?host=/cloudsql/PROJECT_ID:REGION:guesty-migrate-db
+#   No DB_SSL needed — the Auth Proxy socket is not SSL.
+#
+# OPTIONAL SECRETS: All secrets referenced via secretKeyRef MUST exist in
+# Secret Manager before deploying, even if the feature is unused (Cloud Run
+# will fail to start a revision if a referenced secret is missing).
+# Create unused optional secrets with a placeholder value, e.g.:
+#   echo -n "disabled" | gcloud secrets create RESEND_API_KEY --data-file=-
 ##############################################################################
 
 apiVersion: serving.knative.dev/v1
@@ -22,8 +36,11 @@ spec:
         # Keep at least one instance warm so the BullMQ worker is always running
         autoscaling.knative.dev/minScale: "1"
         autoscaling.knative.dev/maxScale: "10"
+        # Cloud SQL Auth Proxy — injects Unix socket at
+        #   /cloudsql/PROJECT_ID:REGION:guesty-migrate-db
+        # Required for the Unix-socket DATABASE_URL to work.
+        run.googleapis.com/cloudsql-instances: PROJECT_ID:REGION:guesty-migrate-db
         # VPC connector — required to reach Memorystore (private IP only).
-        # Replace CONNECTOR_NAME with the name you created in deploy/README.md.
         run.googleapis.com/vpc-access-connector: projects/PROJECT_ID/locations/REGION/connectors/CONNECTOR_NAME
         run.googleapis.com/vpc-access-egress: private-ranges-only
     spec:
@@ -44,15 +61,12 @@ spec:
               value: production
             - name: PORT
               value: "8080"
-            # DB_SSL=true — required for Cloud SQL
-            - name: DB_SSL
-              value: "true"
             # FRONTEND_URL — comma-separated list of allowed CORS origins.
             # Include your Cloud Run URL and any custom domain.
             # Example: https://guesty-migrate-xyz-uc.a.run.app,https://app.guestymigrate.com
             - name: FRONTEND_URL
               value: https://YOUR_CLOUD_RUN_URL,https://YOUR_CUSTOM_DOMAIN
-            # ── Secrets from Secret Manager ───────────────────────────────
+            # ── Required secrets from Secret Manager ──────────────────────
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -73,6 +87,9 @@ spec:
                 secretKeyRef:
                   name: REDIS_URL
                   key: latest
+            # ── Optional secrets (must still exist in Secret Manager) ──────
+            # Create with placeholder if feature is unused:
+            #   echo -n "disabled" | gcloud secrets create SECRET_NAME --data-file=-
             - name: STRIPE_SECRET_KEY
               valueFrom:
                 secretKeyRef:

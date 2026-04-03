@@ -5,11 +5,19 @@
 #   gcloud run services replace deploy/rate-strategy-migrator.cloudrun.yaml \
 #     --region us-central1
 #
-# Replace IMAGE_TAG with the actual $SHORT_SHA from Cloud Build, or "latest".
+# Before deploying, replace ALL placeholder values:
+#   PROJECT_ID   — your GCP project ID
+#   REGION       — your GCP region (e.g. us-central1)
+#   REPO         — your Artifact Registry repo name (e.g. guesty-migrate)
+#   IMAGE_TAG    — image tag from Cloud Build ($SHORT_SHA or "latest")
+#   CONNECTOR_NAME — your Serverless VPC Access connector name
+#
+# DATABASE_URL format for Cloud SQL Auth Proxy (Unix socket):
+#   postgresql://guesty_app:PASSWORD@/guesty_migrate?host=/cloudsql/PROJECT_ID:REGION:guesty-migrate-db
+#   No DB_SSL needed — the Auth Proxy socket is not SSL.
 #
 # IMPORTANT — Memorystore (Redis) requires a Serverless VPC Access Connector.
-# Set the connector name in the annotation below before deploying.
-# See deploy/README.md for setup instructions.
+# See deploy/README.md Step 6 for setup instructions.
 ##############################################################################
 
 apiVersion: serving.knative.dev/v1
@@ -26,8 +34,11 @@ spec:
         autoscaling.knative.dev/minScale: "1"
         # Limit to 2 instances — Playwright is CPU/memory intensive
         autoscaling.knative.dev/maxScale: "2"
+        # Cloud SQL Auth Proxy — injects Unix socket at
+        #   /cloudsql/PROJECT_ID:REGION:guesty-migrate-db
+        # Required for the Unix-socket DATABASE_URL to work.
+        run.googleapis.com/cloudsql-instances: PROJECT_ID:REGION:guesty-migrate-db
         # VPC connector — required to reach Memorystore (private IP only).
-        # Replace CONNECTOR_NAME with the name you created in deploy/README.md.
         run.googleapis.com/vpc-access-connector: projects/PROJECT_ID/locations/REGION/connectors/CONNECTOR_NAME
         run.googleapis.com/vpc-access-egress: private-ranges-only
     spec:
@@ -62,10 +73,7 @@ spec:
               value: "false"
             - name: GUESTY_APP_URL
               value: https://app.guesty.com
-            # DB_SSL=true — required for Cloud SQL
-            - name: DB_SSL
-              value: "true"
-            # ── Secrets from Secret Manager ───────────────────────────────
+            # ── Required secrets from Secret Manager ──────────────────────
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
