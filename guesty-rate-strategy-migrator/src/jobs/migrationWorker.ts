@@ -66,6 +66,15 @@ async function processJob(job: Bull.Job<MigrationJobPayload>): Promise<void> {
     destContext   = await createIsolatedContext();
 
     // ── Optional: UI validation cross-check on source account ───────────────
+    //
+    // Source-account browser login is intentionally optional and controlled by
+    // ENABLE_UI_VALIDATION. The source account is accessed via the Guesty Open
+    // API (OAuth2) for strategy extraction — that is always performed above.
+    // Browser login to the source account adds a second count-validation step
+    // (API count vs. dashboard count) for high-trust workflows. It is disabled
+    // by default because: (a) it doubles Playwright context overhead, and
+    // (b) strategy creation in the destination account proceeds from API data
+    // regardless of UI validation results.
     if (process.env.ENABLE_UI_VALIDATION === 'true') {
       jobLog.info('Authenticating to source account for UI validation');
       const sourcePage = await loginToGuesty(sourceContext, {

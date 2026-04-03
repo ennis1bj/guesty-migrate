@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { migrationRequestSchema } from '../schemas/migrationSchema';
 import { encrypt } from '../utils/crypto';
 import { getMigrationQueue, type MigrationJobPayload } from '../jobs/migrationQueue';
-import { createJobRecord, getJobRecord, listJobRecords } from '../db/jobRepository';
+import { createJobRecord, updateJobRecord, getJobRecord, listJobRecords } from '../db/jobRepository';
 import { logger } from '../utils/logger';
 
 export const router = Router();
@@ -66,14 +66,31 @@ router.post('/', postLimiter, async (req: Request, res: Response): Promise<void>
     requestedAt,
   };
 
+  // Track whether the DB row was created so we can mark it failed if enqueue fails
+  let dbRowCreated = false;
+
   try {
     // Write initial record to DB before enqueuing (so status is visible immediately)
     await createJobRecord({ jobId, sourceClientId });
+    dbRowCreated = true;
+
     await getMigrationQueue().add(payload, { jobId });
     logger.info({ jobId }, 'Migration job enqueued');
     res.status(202).json({ jobId, status: 'queued' });
   } catch (err) {
     logger.error({ error: (err as Error).message }, 'Failed to create migration job');
+
+    // If the DB row was created but enqueue failed, mark it failed so it never
+    // stays orphaned as 'queued' with no worker processing it
+    if (dbRowCreated) {
+      await updateJobRecord(jobId, {
+        status: 'failed',
+        completedAt: new Date().toISOString(),
+        errors: [{ strategyName: '__job__', error: `Enqueue failed: ${(err as Error).message}` }],
+        durationMs: 0,
+      }).catch(() => {});
+    }
+
     res.status(500).json({ error: 'Failed to create migration job' });
   }
 });
