@@ -1032,6 +1032,25 @@ async function runMigration(migrationId) {
           // create duplicates when the engine was killed mid-loop.
           if (sourceId && idMap[sourceId]) {
             migratedCount++;
+            // Re-populate destParentMtlIds for MTL parents that were already
+            // created in a prior interrupted run.  Without this, sub-units
+            // retried in the current pass would find destParentMtlIds empty
+            // and be created without mtl.p → orphaned standalone listings
+            // instead of being attached to their multi-unit parent.
+            if (category === 'listings' && item.type === 'MTL') {
+              const destId = idMap[sourceId];
+              if (!destParentMtlIds[destId]) {
+                try {
+                  const destListing = await destClient.request('GET', `/listings/${destId}`);
+                  if (destListing?.mtl?._id) {
+                    destParentMtlIds[destId] = destListing.mtl._id;
+                    log.info(`listings: re-populated mtl._id for already-created parent`, { destId, mtlId: destListing.mtl._id });
+                  }
+                } catch (e) {
+                  log.warn(`listings: could not fetch mtl._id for already-created parent`, { destId, error: e.message });
+                }
+              }
+            }
             continue;
           }
 
