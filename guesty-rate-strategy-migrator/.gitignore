@@ -1,0 +1,31 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build output
+dist/
+
+# Dependencies
+node_modules/
+
+# Playwright auth state and test results
+playwright/.auth/
+test-results/
+playwright-report/
+
+# Failure screenshots (stored in /tmp at runtime)
+/tmp/migration-failure-*.png
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Logs
+*.log
+logs/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
