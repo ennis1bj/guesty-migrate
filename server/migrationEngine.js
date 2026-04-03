@@ -983,11 +983,6 @@ async function runMigration(migrationId) {
       const idMap = (partialStoredMap && typeof partialStoredMap === 'object')
         ? { ...partialStoredMap }
         : {};
-      // destParentMtlIds: dest listing _id → dest listing mtl._id for MTL parents.
-      // Populated as parents are created; used to wire mtl.p on sub-units at
-      // creation time (the only time Guesty allows it — PUT /listings silently
-      // ignores mtl field changes post-creation).
-      const destParentMtlIds = {};
       if (Object.keys(idMap).length > 0) {
         log.info(`${category}: resuming with ${Object.keys(idMap).length} already-created item(s) from partial run`);
       }
@@ -1032,25 +1027,6 @@ async function runMigration(migrationId) {
           // create duplicates when the engine was killed mid-loop.
           if (sourceId && idMap[sourceId]) {
             migratedCount++;
-            // Re-populate destParentMtlIds for MTL parents that were already
-            // created in a prior interrupted run.  Without this, sub-units
-            // retried in the current pass would find destParentMtlIds empty
-            // and be created without mtl.p → orphaned standalone listings
-            // instead of being attached to their multi-unit parent.
-            if (category === 'listings' && item.type === 'MTL') {
-              const destId = idMap[sourceId];
-              if (!destParentMtlIds[destId]) {
-                try {
-                  const destListing = await destClient.request('GET', `/listings/${destId}`);
-                  if (destListing?.mtl?._id) {
-                    destParentMtlIds[destId] = destListing.mtl._id;
-                    log.info(`listings: re-populated mtl._id for already-created parent`, { destId, mtlId: destListing.mtl._id });
-                  }
-                } catch (e) {
-                  log.warn(`listings: could not fetch mtl._id for already-created parent`, { destId, error: e.message });
-                }
-              }
-            }
             continue;
           }
 
@@ -1068,14 +1044,15 @@ async function runMigration(migrationId) {
           }
 
           // For MTL sub-units: inject mtl.p at creation time using the destination
-          // parent's mtl._id.  Guesty wires the parent-child relationship from mtl.p
-          // during POST; the field is read-only after creation (PUT silently ignores it).
+          // parent's listing _id.  Guesty wires the parent-child relationship from
+          // mtl.p during POST; the field is read-only after creation (PUT silently
+          // ignores it).  mtl.p must be the parent LISTING _id — verified against
+          // Guesty's own UI behaviour which also uses the listing _id here.
           if (category === 'listings' && item.parentId) {
             const destParentId = idMaps.listings?.[item.parentId];
-            const destParentMtlId = destParentId && destParentMtlIds[destParentId];
-            if (destParentMtlId) {
-              transformed = { ...transformed, mtl: { p: destParentMtlId } };
-              log.debug(`listings: injecting mtl.p for sub-unit`, { sourceId, destParentMtlId });
+            if (destParentId) {
+              transformed = { ...transformed, mtl: { p: destParentId } };
+              log.debug(`listings: injecting mtl.p for sub-unit`, { sourceId, destParentId });
             }
           }
 
@@ -1088,12 +1065,6 @@ async function runMigration(migrationId) {
 
           // Photo handling for listings
           if (category === 'listings') {
-            // After creating an MTL parent, capture its mtl._id so we can wire
-            // mtl.p correctly on sub-units that will be created later in this loop.
-            if (created.type === 'MTL' && created.mtl?._id && newId) {
-              destParentMtlIds[newId] = created.mtl._id;
-              log.info(`listings: captured mtl._id for parent`, { destParentId: newId, mtlId: created.mtl._id });
-            }
             // Guesty's Open API v1 has no working separate photo upload endpoint.
             // Photos are included directly in the POST /listings create body
             // (via the pictures[] array) — Guesty handles them at creation time.
