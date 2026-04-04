@@ -18,9 +18,11 @@ COPY --from=build /app/client/dist ./client/dist
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 USER appuser
 
-EXPOSE 3001
+# Cloud Run injects PORT=8080; fallback to 3001 for local dev
+ENV PORT=8080
+EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://localhost:3001/api/health || exit 1
+  CMD wget -qO- http://localhost:${PORT}/api/health || exit 1
 
 CMD ["node", "server/index.js"]

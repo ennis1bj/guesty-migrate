@@ -1,6 +1,8 @@
 node_modules/
 client/dist/
 .env
+*.env
+deploy-gcp.env
 *.log
 .DS_Store
 tsconfig.tsbuildinfo
