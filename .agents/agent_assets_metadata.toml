@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "L5gaF_7SZwuz_FT7NNzDN"
+uri = "file://guesty_audit_report.md"
+type = "text"
+title = "Destination Guesty Account — Audit Report"
