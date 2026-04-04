@@ -104,7 +104,8 @@ gcloud sql instances describe "${DB_INSTANCE}" --project="${GCP_PROJECT}" &>/dev
 } || {
   gcloud sql instances create "${DB_INSTANCE}" \
     --database-version=POSTGRES_16 \
-    --tier=db-g1-small \
+    --edition=enterprise \
+    --tier=db-f1-micro \
     --region="${REGION}" \
     --storage-type=SSD \
     --storage-size=10GB \
