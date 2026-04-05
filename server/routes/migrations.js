@@ -459,7 +459,7 @@ router.get('/:id/status', async (req, res) => {
     const { id } = req.params;
 
     const migResult = await pool.query(
-      'SELECT id, status, manifest, selected_categories, selected_addons, pricing_mode, results, diff_report, error_message, created_at, completed_at FROM migrations WHERE id = $1 AND user_id = $2',
+      'SELECT id, status, manifest, selected_categories, selected_addons, pricing_mode, results, diff_report, error_message, created_at, completed_at, last_progress_at FROM migrations WHERE id = $1 AND user_id = $2',
       [id, req.user.id]
     );
 

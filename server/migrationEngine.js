@@ -1110,7 +1110,7 @@ async function runMigration(migrationId) {
             // items and avoid duplicating listings in the destination account.
             // Calendar block migration runs in a parallel post-creation phase.
             if (migratedCount % 10 === 0) {
-              results[category] = { ...(results[category] || {}), idMap: { ...idMap } };
+              results[category] = { ...(results[category] || {}), idMap: { ...idMap }, migratedCount, failedCount, sourceCount };
               await updateStatus(migrationId, 'running', { results });
               log.info(`listings: checkpoint saved — ${migratedCount} of ${sourceCount} mapped`);
             }

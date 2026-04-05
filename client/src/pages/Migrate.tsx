@@ -78,7 +78,7 @@ interface MigrationStatus {
   id: string;
   status: string;
   manifest: Record<string, number>;
-  results: Record<string, { sourceCount: number; migratedCount: number; failedCount: number }> | null;
+  results: Record<string, { sourceCount?: number; migratedCount?: number; failedCount?: number; idMap?: Record<string, string> }> | null;
   diff_report: Record<string, {
     source?: number;
     destination?: number;
@@ -96,6 +96,38 @@ interface MigrationStatus {
     failed_count: number;
   }>;
   error_message: string | null;
+  created_at: string;
+  last_progress_at: string | null;
+}
+
+const CATEGORY_LABELS: Record<string, string> = {
+  custom_fields: 'Custom Fields',
+  fees: 'Fees',
+  listings: 'Listings',
+  rate_strategies: 'Rate Strategies',
+  guests: 'Guests',
+  owners: 'Owners',
+  saved_replies: 'Saved Replies',
+  reservations: 'Reservations',
+  tasks: 'Tasks',
+  pricing_snapshot: 'Pricing Snapshot',
+};
+
+function formatElapsed(createdAt: string): string {
+  const ms = Date.now() - new Date(createdAt).getTime();
+  const totalSecs = Math.floor(ms / 1000);
+  if (totalSecs < 60) return `${totalSecs}s`;
+  const mins = Math.floor(totalSecs / 60);
+  if (mins < 60) return `${mins}m ${totalSecs % 60}s`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+
+function formatAgo(iso: string | null | undefined): string {
+  if (!iso) return 'unknown';
+  const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (secs < 5) return 'just now';
+  if (secs < 60) return `${secs}s ago`;
+  return `${Math.floor(secs / 60)}m ago`;
 }
 
 function calculatePerListingCents(listingCount: number): number {
@@ -399,6 +431,12 @@ export default function Migrate() {
   };
 
   const isTerminal = migrationStatus && ['complete', 'complete_with_errors', 'failed'].includes(migrationStatus.status);
+
+  const completedCats = new Set((migrationStatus?.logs || []).map((l) => l.category));
+  const activeEntry = Object.entries(migrationStatus?.results || {}).find(([k]) => !completedCats.has(k));
+  const activeCat = activeEntry?.[0] ?? null;
+  const activeData = activeEntry?.[1] ?? null;
+  const totalFailedAcrossLogs = (migrationStatus?.logs || []).reduce((s, l) => s + (l.failed_count || 0), 0);
 
   const handleRetry = async () => {
     if (!migrationId) return;
@@ -1249,12 +1287,59 @@ export default function Migrate() {
             </div>
           )}
 
-          {migrationStatus && migrationStatus.logs && migrationStatus.logs.length > 0 && (
-            <div className="mb-8">
+          {/* Elapsed time + last updated — visible while running or after completion */}
+          {migrationStatus?.created_at && ['running', 'complete', 'complete_with_errors'].includes(migrationStatus.status) && (
+            <div className="mb-5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 bg-stone-50 border border-stone-200 rounded-lg px-4 py-2.5">
+              <span>⏱ <strong className="text-slate-700">{formatElapsed(migrationStatus.created_at)}</strong> elapsed</span>
+              {migrationStatus.last_progress_at && migrationStatus.status === 'running' && (
+                <span>· Updated <strong className="text-slate-700">{formatAgo(migrationStatus.last_progress_at)}</strong></span>
+              )}
+            </div>
+          )}
+
+          {/* Current activity panel — shown while running */}
+          {migrationStatus?.status === 'running' && (() => {
+            const activeLabel = activeCat ? (CATEGORY_LABELS[activeCat] ?? activeCat) : null;
+            const done = activeData?.migratedCount ?? 0;
+            const total = activeData?.sourceCount ?? 0;
+            const failed = activeData?.failedCount ?? 0;
+            const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+            return (
+              <div className="mb-5 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                <div className="flex items-center gap-2.5 mb-1.5">
+                  <div className="animate-spin w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full flex-shrink-0" />
+                  <p className="text-sm font-semibold text-amber-900">
+                    {activeLabel ? `Migrating ${activeLabel}` : 'Preparing migration'}
+                  </p>
+                </div>
+                {!activeLabel && (
+                  <p className="text-xs text-amber-700 pl-6">Analyzing listing relationships and resolving multi-unit complexes…</p>
+                )}
+                {activeLabel && total > 0 && (
+                  <>
+                    <p className="text-xs text-amber-700 pl-6 mb-1.5">
+                      {done.toLocaleString()} of {total.toLocaleString()} done ({pct}%)
+                      {failed > 0 && <span className="ml-2 text-red-600">· {failed} failed</span>}
+                    </p>
+                    <div className="mx-6 bg-amber-100 rounded-full h-2">
+                      <div className="h-2 rounded-full bg-amber-500 transition-all duration-500" style={{ width: `${pct}%` }} />
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Completed category progress bars */}
+          {migrationStatus?.logs && migrationStatus.logs.length > 0 && (
+            <div className="mb-6">
+              {migrationStatus.status === 'running' && (
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">Completed</p>
+              )}
               {migrationStatus.logs.map((log) => (
                 <ProgressBar
                   key={log.category}
-                  label={log.category}
+                  label={CATEGORY_LABELS[log.category] ?? log.category}
                   current={log.migrated_count}
                   total={log.source_count}
                   status={log.status}
@@ -1263,10 +1348,11 @@ export default function Migrate() {
             </div>
           )}
 
-          {migrationStatus && migrationStatus.status === 'running' && (!migrationStatus.logs || migrationStatus.logs.length === 0) && (
-            <div className="text-center py-8">
-              <div className="animate-spin w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full mx-auto mb-4" />
-              <p className="text-slate-400">Migration in progress...</p>
+          {/* Failed items summary */}
+          {totalFailedAcrossLogs > 0 && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2 text-sm text-red-700">
+              <span className="mt-0.5">⚠</span>
+              <span>{totalFailedAcrossLogs.toLocaleString()} item(s) failed across completed categories — these will be skipped on retry.</span>
             </div>
           )}
 
