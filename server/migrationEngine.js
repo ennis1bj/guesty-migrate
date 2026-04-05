@@ -1088,6 +1088,7 @@ async function runMigration(migrationId) {
             }
           }
 
+          await touchProgress(migrationId); // heartbeat before every blocking Guesty create call
           const created = await categoryDef.create(destClient, transformed);
           const newId = created._id || created.id;
           if (sourceId && newId) {
