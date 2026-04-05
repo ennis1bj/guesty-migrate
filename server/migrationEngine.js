@@ -170,12 +170,12 @@ const CATEGORIES = {
      * Handle nickname conflicts: when a listing already exists in the destination
      * with the same nickname (e.g. from prior manual remediation), look it up by
      * nickname, add it to idMap, and count it as successfully migrated rather than
-     * a failure.  Guesty returns 422 or 409 with a message referencing "nickname"
-     * for this case.
+     * a failure.  Guesty returns 422, 409, or 400 with a message referencing
+     * "nickname" for this case.
      */
     handleConflict: async (err, item, destClient, idMap) => {
       const status = err.response?.status;
-      if (status !== 409 && status !== 422) return false;
+      if (status !== 400 && status !== 409 && status !== 422) return false;
       const rawMsg = err.response?.data?.message ?? err.response?.data ?? '';
       const msg = typeof rawMsg === 'object' ? JSON.stringify(rawMsg) : String(rawMsg);
       if (!msg.toLowerCase().includes('nickname')) return false;
