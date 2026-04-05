@@ -166,6 +166,29 @@ const CATEGORIES = {
       const { standalone, parents, subUnits } = classifyListings(items);
       return [...standalone, ...parents, ...subUnits];
     },
+    /**
+     * Handle nickname conflicts: when a listing already exists in the destination
+     * with the same nickname (e.g. from prior manual remediation), look it up by
+     * nickname, add it to idMap, and count it as successfully migrated rather than
+     * a failure.  Guesty returns 422 or 409 with a message referencing "nickname"
+     * for this case.
+     */
+    handleConflict: async (err, item, destClient, idMap) => {
+      const status = err.response?.status;
+      if (status !== 409 && status !== 422) return false;
+      const rawMsg = err.response?.data?.message ?? err.response?.data ?? '';
+      const msg = typeof rawMsg === 'object' ? JSON.stringify(rawMsg) : String(rawMsg);
+      if (!msg.toLowerCase().includes('nickname')) return false;
+
+      const nickname = item.nickname;
+      if (!nickname) return false;
+
+      const existing = await destClient.findListingByNickname(nickname);
+      if (!existing || !existing._id) return false;
+
+      idMap[item._id] = existing._id;
+      return true;
+    },
     transform: (item, maps) => {
       const cleaned = stripFieldsDeep(item);
 

@@ -519,6 +519,19 @@ class GuestyClient {
     return this.request('POST', '/listings', data);
   }
 
+  async findListingByNickname(nickname) {
+    try {
+      const data = await this.request(
+        'GET',
+        `/listings?filters[nickname]=${encodeURIComponent(nickname)}&limit=1&fields=_id nickname`
+      );
+      const results = data.results || data;
+      return Array.isArray(results) ? results[0] : null;
+    } catch {
+      return null;
+    }
+  }
+
   async createReservation(data) {
     return this.request('POST', '/reservations', data);
   }
