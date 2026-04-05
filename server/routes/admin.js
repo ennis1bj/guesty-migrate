@@ -320,6 +320,7 @@ router.post('/migrations/:id/retry', async (req, res) => {
        SET status = 'paid',
            error_message = NULL,
            completed_at = NULL,
+           last_progress_at = NOW(),
            retry_count = retry_count + 1
        WHERE id = $1
        RETURNING id, status, retry_count`,

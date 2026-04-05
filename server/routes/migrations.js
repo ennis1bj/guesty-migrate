@@ -534,7 +534,7 @@ router.post('/:id/retry', async (req, res) => {
     }
 
     await pool.query(
-      "UPDATE migrations SET status = 'paid', error_message = NULL, retry_count = retry_count + 1 WHERE id = $1",
+      "UPDATE migrations SET status = 'paid', error_message = NULL, last_progress_at = NOW(), retry_count = retry_count + 1 WHERE id = $1",
       [id]
     );
 
