@@ -78,6 +78,9 @@ router.post('/preflight', async (req, res) => {
         // all sub-units and show "Cannot migrate / No sub-units found".
         // MTL parent listings have parentId=null, so they get complexId=null and
         // are correctly identified by the frontend as true parents (!l.complexId).
+        // NOTE: Guesty's bulk API often omits parentId for MTL_CHILD listings too.
+        // The backfill pass below uses subListingsIds (present on parents) to fix
+        // any sub-unit entries that still have complexId=null after this map().
         complexId:        l.parentId || null,
         parentId:         l.parentId || null,
         city:             l.address?.city || null,
@@ -87,6 +90,34 @@ router.post('/preflight', async (req, res) => {
         isChannelManaged: Array.isArray(l.integrations) &&
                           l.integrations.some(i => i && (i.channelName || i.platform || i.channel)),
       }));
+
+      // Guesty's bulk API often omits parentId / complexId on MTL_CHILD sub-unit
+      // listings entirely — those fields are simply absent from the response.
+      // Build a child→parent map from two sources available on parent listings:
+      //   1. subListingsIds  — standard Guesty field (present on some accounts)
+      //   2. mtl.c           — Guesty's internal children array (present on most accounts)
+      // Use this map to backfill complexId on sub-unit listingDetail entries that
+      // still have complexId=null so the frontend listing selector correctly groups
+      // sub-units under their parent and avoids showing "Cannot migrate".
+      const subUnitParentMap = {};
+      for (const l of allListings) {
+        if (Array.isArray(l.subListingsIds) && l.subListingsIds.length > 0) {
+          for (const subId of l.subListingsIds) {
+            subUnitParentMap[subId] = l._id;
+          }
+        }
+        if (l.mtl && Array.isArray(l.mtl.c) && l.mtl.c.length > 0) {
+          for (const subId of l.mtl.c) {
+            if (!subUnitParentMap[subId]) subUnitParentMap[subId] = l._id;
+          }
+        }
+      }
+      for (const ld of listingDetails) {
+        if (!ld.complexId && subUnitParentMap[ld.id]) {
+          ld.complexId = subUnitParentMap[ld.id];
+          ld.parentId  = subUnitParentMap[ld.id];
+        }
+      }
 
       const migratableListings   = listingDetails.filter(l => !l.isChannelManaged);
       const channelManagedCount  = listingDetails.length - migratableListings.length;
