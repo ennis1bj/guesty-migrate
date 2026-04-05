@@ -831,22 +831,25 @@ async function runMigration(migrationId) {
 
                 if (orphanedIds.length > 0) {
                   log.info(`Pilot: resolving ${orphanedIds.length} orphaned MTL(s) whose complexId was missing from bulk API response`);
-                  // Fetch in chunks so we can heartbeat between chunks and avoid
-                  // triggering the 15-minute stall detector on large accounts.
-                  const ORPHAN_CHUNK = 50;
-                  for (let oi = 0; oi < orphanedIds.length; oi += ORPHAN_CHUNK) {
+                  // Fetch one at a time with a heartbeat before EACH request.
+                  // A chunk-based approach (e.g. 50 per chunk) is not safe: with
+                  // Guesty 429 Retry-After waits (capped at 60s × 3 retries) a
+                  // single chunk can take 30+ min, causing the stall detector to
+                  // fire before the next heartbeat.  Sequential processing keeps
+                  // the heartbeat window well under 15 minutes.
+                  for (let oi = 0; oi < orphanedIds.length; oi++) {
                     await touchProgress(migrationId);
-                    const chunk = orphanedIds.slice(oi, oi + ORPHAN_CHUNK);
-                    const chunkFull = await sourceClient.getListingsByIds(chunk);
-                    for (const ol of chunkFull) {
+                    let ol = null;
+                    try { ol = await sourceClient.request('GET', `/listings/${orphanedIds[oi]}`); } catch { /* skip on error */ }
+                    if (ol) {
                       const cId = ol.complexId || ol.parentId;
                       if (cId && wantedComplexIds.has(cId) && !seenIds.has(ol._id)) {
                         missingIds.add(ol._id);
                         seenIds.add(ol._id);
                       }
                     }
-                    if (oi > 0 && oi % 200 === 0) {
-                      log.info(`Pilot: orphaned MTL resolution — ${Math.min(oi + ORPHAN_CHUNK, orphanedIds.length)}/${orphanedIds.length} fetched`);
+                    if (oi > 0 && oi % 100 === 0) {
+                      log.info(`Pilot: orphaned MTL resolution — ${oi}/${orphanedIds.length} fetched, ${missingIds.size} matched`);
                     }
                   }
                   if (missingIds.size > 0) {
