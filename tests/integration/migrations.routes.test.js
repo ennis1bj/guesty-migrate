@@ -3,6 +3,20 @@ const { generateToken } = require('../../server/auth');
 
 jest.mock('express-rate-limit', () => () => (req, res, next) => next());
 
+const mockGetAccessToken   = jest.fn().mockResolvedValue('tok');
+const mockGetAccountId     = jest.fn().mockResolvedValue('acct-1');
+const mockGetAllListings   = jest.fn().mockResolvedValue([]);
+const mockGetCount         = jest.fn().mockResolvedValue(0);
+
+jest.mock('../../server/guestyClient', () =>
+  jest.fn().mockImplementation(() => ({
+    getAccessToken: mockGetAccessToken,
+    getAccountId:   mockGetAccountId,
+    getAllListings: mockGetAllListings,
+    getCount:       mockGetCount,
+  }))
+);
+
 jest.mock('../../server/db', () => ({
   pool: { query: jest.fn() },
   migrate: jest.fn().mockResolvedValue(undefined),
@@ -360,5 +374,150 @@ describe('POST /api/migrations/:id/checkout', () => {
 
     expect(res.status).toBe(503);
     expect(res.body.error).toMatch(/payment processing/i);
+  });
+});
+
+describe('POST /api/migrations/preflight — MTL sub-unit complexId backfill', () => {
+  const PREFLIGHT_BODY = {
+    sourceClientId: 'src-id',
+    sourceClientSecret: 'src-secret',
+    destClientId: 'dst-id',
+    destClientSecret: 'dst-secret',
+  };
+
+  beforeEach(() => {
+    pool.query.mockReset();
+    mockGetAccessToken.mockResolvedValue('tok');
+    mockGetAccountId.mockResolvedValue('acct-1');
+    mockGetCount.mockResolvedValue(0);
+  });
+
+  test('backfills complexId from mtl.c when Guesty omits parentId on MTL_CHILD listings', async () => {
+    mockGetAllListings.mockResolvedValue([
+      {
+        _id: 'parent-1',
+        title: 'Beach Complex',
+        type: 'MTL',
+        parentId: null,
+        complexId: null,
+        integrations: [],
+        pictures: [],
+        mtl: { c: ['child-1', 'child-2'] },
+      },
+      {
+        _id: 'child-1',
+        title: 'Beach Unit A',
+        type: 'MTL_CHILD',
+        integrations: [],
+        pictures: [],
+      },
+      {
+        _id: 'child-2',
+        title: 'Beach Unit B',
+        type: 'MTL_CHILD',
+        integrations: [],
+        pictures: [],
+      },
+    ]);
+
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ email_verified: true }] })
+      .mockResolvedValueOnce({ rows: [{ id: 'mig-backfill-1' }] });
+
+    const res = await request(app)
+      .post('/api/migrations/preflight')
+      .set('Authorization', AUTH)
+      .send(PREFLIGHT_BODY);
+
+    expect(res.status).toBe(200);
+
+    const details = res.body.manifest.listingDetails;
+    const child1 = details.find(l => l.id === 'child-1');
+    const child2 = details.find(l => l.id === 'child-2');
+    const parent = details.find(l => l.id === 'parent-1');
+
+    expect(child1.complexId).toBe('parent-1');
+    expect(child1.parentId).toBe('parent-1');
+    expect(child2.complexId).toBe('parent-1');
+    expect(child2.parentId).toBe('parent-1');
+    expect(parent.complexId).toBeNull();
+  });
+
+  test('backfills complexId from subListingsIds when mtl.c is absent', async () => {
+    mockGetAllListings.mockResolvedValue([
+      {
+        _id: 'parent-2',
+        title: 'Mountain Complex',
+        type: 'MTL',
+        parentId: null,
+        complexId: null,
+        subListingsIds: ['child-3'],
+        integrations: [],
+        pictures: [],
+      },
+      {
+        _id: 'child-3',
+        title: 'Mountain Unit A',
+        type: 'MTL_CHILD',
+        integrations: [],
+        pictures: [],
+      },
+    ]);
+
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ email_verified: true }] })
+      .mockResolvedValueOnce({ rows: [{ id: 'mig-backfill-2' }] });
+
+    const res = await request(app)
+      .post('/api/migrations/preflight')
+      .set('Authorization', AUTH)
+      .send(PREFLIGHT_BODY);
+
+    expect(res.status).toBe(200);
+
+    const details = res.body.manifest.listingDetails;
+    const child3 = details.find(l => l.id === 'child-3');
+    expect(child3.complexId).toBe('parent-2');
+    expect(child3.parentId).toBe('parent-2');
+  });
+
+  test('does not overwrite complexId already set directly by the API', async () => {
+    mockGetAllListings.mockResolvedValue([
+      {
+        _id: 'parent-3',
+        title: 'City Complex',
+        type: 'MTL',
+        parentId: null,
+        complexId: null,
+        mtl: { c: ['child-4'] },
+        integrations: [],
+        pictures: [],
+      },
+      {
+        _id: 'child-4',
+        title: 'City Unit A',
+        type: 'MTL_CHILD',
+        parentId: 'parent-3',
+        complexId: null,
+        integrations: [],
+        pictures: [],
+      },
+    ]);
+
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ email_verified: true }] })
+      .mockResolvedValueOnce({ rows: [{ id: 'mig-backfill-3' }] });
+
+    const res = await request(app)
+      .post('/api/migrations/preflight')
+      .set('Authorization', AUTH)
+      .send(PREFLIGHT_BODY);
+
+    expect(res.status).toBe(200);
+
+    const details = res.body.manifest.listingDetails;
+    const child4 = details.find(l => l.id === 'child-4');
+    expect(child4.complexId).toBe('parent-3');
+    expect(child4.parentId).toBe('parent-3');
   });
 });

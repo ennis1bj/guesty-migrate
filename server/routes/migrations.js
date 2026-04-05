@@ -99,7 +99,7 @@ router.post('/preflight', async (req, res) => {
       // Use this map to backfill complexId on sub-unit listingDetail entries that
       // still have complexId=null so the frontend listing selector correctly groups
       // sub-units under their parent and avoids showing "Cannot migrate".
-      const subUnitParentMap = {};
+      const subUnitParentMap = Object.create(null);
       for (const l of allListings) {
         if (Array.isArray(l.subListingsIds) && l.subListingsIds.length > 0) {
           for (const subId of l.subListingsIds) {
