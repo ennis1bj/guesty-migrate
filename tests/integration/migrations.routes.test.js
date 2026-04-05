@@ -520,4 +520,99 @@ describe('POST /api/migrations/preflight — MTL sub-unit complexId backfill', (
     expect(child4.complexId).toBe('parent-3');
     expect(child4.parentId).toBe('parent-3');
   });
+
+  test('backfills complexId via mtl._id/mtl.p entity linkage when mtl.c is absent (DB-SHAW pattern)', async () => {
+    mockGetAllListings.mockResolvedValue([
+      {
+        _id: 'parent-shaw',
+        title: 'Wyndham Shawnee | 1BR Suite',
+        type: 'MTL',
+        parentId: null,
+        complexId: null,
+        integrations: [],
+        pictures: [],
+        mtl: { _id: 'mtl-entity-shaw' },
+      },
+      {
+        _id: 'child-shaw-1',
+        title: 'Shaw Unit 101',
+        type: 'MTL_CHILD',
+        integrations: [],
+        pictures: [],
+        mtl: { p: 'mtl-entity-shaw' },
+      },
+      {
+        _id: 'child-shaw-2',
+        title: 'Shaw Unit 102',
+        type: 'MTL_CHILD',
+        integrations: [],
+        pictures: [],
+        mtl: { p: 'mtl-entity-shaw' },
+      },
+    ]);
+
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ email_verified: true }] })
+      .mockResolvedValueOnce({ rows: [{ id: 'mig-backfill-shaw' }] });
+
+    const res = await request(app)
+      .post('/api/migrations/preflight')
+      .set('Authorization', AUTH)
+      .send(PREFLIGHT_BODY);
+
+    expect(res.status).toBe(200);
+
+    const details = res.body.manifest.listingDetails;
+    const childShaw1 = details.find(l => l.id === 'child-shaw-1');
+    const childShaw2 = details.find(l => l.id === 'child-shaw-2');
+    const parentShaw = details.find(l => l.id === 'parent-shaw');
+
+    expect(childShaw1.complexId).toBe('parent-shaw');
+    expect(childShaw1.parentId).toBe('parent-shaw');
+    expect(childShaw2.complexId).toBe('parent-shaw');
+    expect(childShaw2.parentId).toBe('parent-shaw');
+    expect(parentShaw.complexId).toBeNull();
+
+    const cg = res.body.manifest.complexGroups;
+    expect(cg['parent-shaw']).toEqual(expect.arrayContaining(['child-shaw-1', 'child-shaw-2']));
+  });
+
+  test('complexGroups is built from corrected listingDetails — not raw Guesty data', async () => {
+    mockGetAllListings.mockResolvedValue([
+      {
+        _id: 'parent-5',
+        title: 'Lake Complex',
+        type: 'MTL',
+        parentId: null,
+        complexId: null,
+        integrations: [],
+        pictures: [],
+        mtl: { _id: 'mtl-entity-lake', c: ['child-5'] },
+      },
+      {
+        _id: 'child-5',
+        title: 'Lake Unit A',
+        type: 'MTL_CHILD',
+        integrations: [],
+        pictures: [],
+        mtl: { p: 'mtl-entity-lake' },
+      },
+    ]);
+
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ email_verified: true }] })
+      .mockResolvedValueOnce({ rows: [{ id: 'mig-backfill-cg' }] });
+
+    const res = await request(app)
+      .post('/api/migrations/preflight')
+      .set('Authorization', AUTH)
+      .send(PREFLIGHT_BODY);
+
+    expect(res.status).toBe(200);
+
+    const cg = res.body.manifest.complexGroups;
+    expect(Array.isArray(cg['parent-5'])).toBe(true);
+    expect(cg['parent-5']).toContain('child-5');
+    expect(cg['child-5']).toBeUndefined();
+  });
 });

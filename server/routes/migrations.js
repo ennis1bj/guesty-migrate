@@ -93,13 +93,19 @@ router.post('/preflight', async (req, res) => {
 
       // Guesty's bulk API often omits parentId / complexId on MTL_CHILD sub-unit
       // listings entirely — those fields are simply absent from the response.
-      // Build a child→parent map from two sources available on parent listings:
-      //   1. subListingsIds  — standard Guesty field (present on some accounts)
-      //   2. mtl.c           — Guesty's internal children array (present on most accounts)
-      // Use this map to backfill complexId on sub-unit listingDetail entries that
-      // still have complexId=null so the frontend listing selector correctly groups
-      // sub-units under their parent and avoids showing "Cannot migrate".
+      // Build a child→parent listing _id map from four sources, in priority order:
+      //   1. subListingsIds — standard Guesty field on parent listings
+      //   2. mtl.c          — Guesty's internal children array on parent listings
+      //   3. mtl._id / mtl.p — MTL entity ID linkage: each parent has mtl._id
+      //                        and each child has mtl.p pointing to that entity.
+      //                        Handles accounts (e.g. Wyndham Shawnee) where
+      //                        mtl.c is absent but mtl.p IS set on child listings.
+      // After building the map, backfill complexId on listingDetail entries that
+      // still have complexId=null so the frontend correctly groups sub-units and
+      // avoids showing "Cannot migrate / No sub-units found" on every MTL parent.
       const subUnitParentMap = Object.create(null);
+
+      // Source 1 & 2: subListingsIds and mtl.c on parent listings
       for (const l of allListings) {
         if (Array.isArray(l.subListingsIds) && l.subListingsIds.length > 0) {
           for (const subId of l.subListingsIds) {
@@ -112,6 +118,23 @@ router.post('/preflight', async (req, res) => {
           }
         }
       }
+
+      // Source 3: mtl._id (on parent) ↔ mtl.p (on child) entity-level linkage.
+      // Some Guesty accounts omit mtl.c on parents entirely but DO set mtl.p on
+      // each child listing — use this to catch any remaining un-mapped children.
+      const mtlEntityToParentId = Object.create(null);
+      for (const l of allListings) {
+        if (l.type === 'MTL' && l.mtl?._id) {
+          mtlEntityToParentId[l.mtl._id] = l._id;
+        }
+      }
+      for (const l of allListings) {
+        if (!subUnitParentMap[l._id] && l.mtl?.p && mtlEntityToParentId[l.mtl.p]) {
+          subUnitParentMap[l._id] = mtlEntityToParentId[l.mtl.p];
+        }
+      }
+
+      // Apply backfill
       for (const ld of listingDetails) {
         if (!ld.complexId && subUnitParentMap[ld.id]) {
           ld.complexId = subUnitParentMap[ld.id];
@@ -122,33 +145,19 @@ router.post('/preflight', async (req, res) => {
       const migratableListings   = listingDetails.filter(l => !l.isChannelManaged);
       const channelManagedCount  = listingDetails.length - migratableListings.length;
 
-      // Build a complexId → [listingId, ...] map from the full listing catalogue.
-      // Stored in the manifest so the migration engine can instantly look up all
-      // siblings of any sub-unit (or all children of a parent) without making
-      // additional Guesty API calls during the migration run.
-      //
-      // Three linkage fields are used (Guesty returns different ones for
-      // different listing types):
-      //   complexId  — set on MTL listings pointing to the complex entity
-      //   parentId   — set on MTL_CHILD listings pointing to their MTL parent
-      //   subListingsIds — array on MTL listings listing their direct children
-      const complexGroups = {};
-      for (const l of allListings) {
-        // Group sub-units under their complex entity (complexId) or MTL parent
-        const cId = l.complexId || l.parentId;
-        if (cId) {
-          if (!complexGroups[cId]) complexGroups[cId] = [];
-          complexGroups[cId].push(l._id);
-        }
-        // Also index an MTL listing's direct children under its own _id so the
-        // pilot phase can find them when looking up by listing ID, not complex ID.
-        if (Array.isArray(l.subListingsIds) && l.subListingsIds.length > 0) {
-          if (!complexGroups[l._id]) complexGroups[l._id] = [];
-          for (const subId of l.subListingsIds) {
-            if (!complexGroups[l._id].includes(subId)) {
-              complexGroups[l._id].push(subId);
-            }
-          }
+      // Build complexGroups from the corrected listingDetails (after all backfills
+      // above).  listingDetails[].complexId is now authoritative — always equal to
+      // the parent's listing _id — which is exactly the key the migration engine
+      // uses for both Case A (parent selected: complexGroups[parent._id]) and
+      // Case B (sub-unit selected: complexGroups[sub.complexId]).
+      // Using listingDetails instead of raw allListings means every child whose
+      // complexId was backfilled via any of the three sources above is correctly
+      // included, with no extra iteration needed.
+      const complexGroups = Object.create(null);
+      for (const ld of listingDetails) {
+        if (ld.complexId) {
+          if (!complexGroups[ld.complexId]) complexGroups[ld.complexId] = [];
+          complexGroups[ld.complexId].push(ld.id);
         }
       }
 
