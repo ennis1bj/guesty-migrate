@@ -470,10 +470,16 @@ const ALLOWED_EXTRA_COLUMNS = new Set([
  */
 async function touchProgress(migrationId) {
   try {
-    await pool.query(
-      `UPDATE migrations SET last_progress_at = NOW() WHERE id = $1`,
-      [migrationId]
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('touchProgress timeout')), 5000)
     );
+    await Promise.race([
+      pool.query(
+        `UPDATE migrations SET last_progress_at = NOW() WHERE id = $1`,
+        [migrationId]
+      ),
+      timeout,
+    ]);
   } catch {
     // Non-fatal — heartbeat failure must not interrupt the migration itself
   }
