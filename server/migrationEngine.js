@@ -469,17 +469,20 @@ const ALLOWED_EXTRA_COLUMNS = new Set([
  * and "hung waiting on a response that will never arrive".
  */
 async function touchProgress(migrationId) {
+  let timeoutId;
   try {
-    const timeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('touchProgress timeout')), 5000)
-    );
     await Promise.race([
       pool.query(
         `UPDATE migrations SET last_progress_at = NOW() WHERE id = $1`,
         [migrationId]
       ),
-      timeout,
-    ]);
+      new Promise((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error('touchProgress timeout')),
+          5000
+        );
+      }),
+    ]).finally(() => clearTimeout(timeoutId));
   } catch {
     // Non-fatal — heartbeat failure must not interrupt the migration itself
   }
@@ -667,6 +670,7 @@ async function runMigration(migrationId) {
         if (category === 'listings' && pilotListingIds?.length) {
           // Fetch each selected listing directly by ID in parallel.
           // Replaces getAllListings() which pages through every listing on the account.
+          log.info(`Pilot: fetching ${pilotListingIds.length} selected listings by ID...`, { migrationId });
           await touchProgress(migrationId);
           rawItems = await sourceClient.getListingsByIds(pilotListingIds);
           log.info(`Pilot: fetched ${rawItems.length}/${pilotListingIds.length} listings by ID`);
@@ -765,6 +769,7 @@ async function runMigration(migrationId) {
           // complexId for all sub-unit types (particularly MTL_CHILD).  We try
           // two progressively more expensive approaches when the manifest lookup
           // above found no new siblings.
+          log.info(`Pilot: complexGroups expansion done — missingIds.size=${missingIds.size}, seenIds.size=${seenIds.size}`, { migrationId });
           if (missingIds.size === 0) {
             // Collect complexIds we still need siblings for (group has <=1 known member)
             const wantedComplexIds = new Set(
