@@ -831,13 +831,22 @@ async function runMigration(migrationId) {
 
                 if (orphanedIds.length > 0) {
                   log.info(`Pilot: resolving ${orphanedIds.length} orphaned MTL(s) whose complexId was missing from bulk API response`);
-                  await touchProgress(migrationId);
-                  const orphanedFull = await sourceClient.getListingsByIds(orphanedIds);
-                  for (const ol of orphanedFull) {
-                    const cId = ol.complexId || ol.parentId;
-                    if (cId && wantedComplexIds.has(cId) && !seenIds.has(ol._id)) {
-                      missingIds.add(ol._id);
-                      seenIds.add(ol._id);
+                  // Fetch in chunks so we can heartbeat between chunks and avoid
+                  // triggering the 15-minute stall detector on large accounts.
+                  const ORPHAN_CHUNK = 50;
+                  for (let oi = 0; oi < orphanedIds.length; oi += ORPHAN_CHUNK) {
+                    await touchProgress(migrationId);
+                    const chunk = orphanedIds.slice(oi, oi + ORPHAN_CHUNK);
+                    const chunkFull = await sourceClient.getListingsByIds(chunk);
+                    for (const ol of chunkFull) {
+                      const cId = ol.complexId || ol.parentId;
+                      if (cId && wantedComplexIds.has(cId) && !seenIds.has(ol._id)) {
+                        missingIds.add(ol._id);
+                        seenIds.add(ol._id);
+                      }
+                    }
+                    if (oi > 0 && oi % 200 === 0) {
+                      log.info(`Pilot: orphaned MTL resolution — ${Math.min(oi + ORPHAN_CHUNK, orphanedIds.length)}/${orphanedIds.length} fetched`);
                     }
                   }
                   if (missingIds.size > 0) {
