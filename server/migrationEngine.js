@@ -672,7 +672,18 @@ async function runMigration(migrationId) {
           // Replaces getAllListings() which pages through every listing on the account.
           log.info(`Pilot: fetching ${pilotListingIds.length} selected listings by ID...`, { migrationId });
           await touchProgress(migrationId);
-          rawItems = await sourceClient.getListingsByIds(pilotListingIds);
+          // getListingsByIds can take 10+ minutes when Guesty is rate-limiting the
+          // source account (semaphore-limited but still sequential under load).
+          // Run a heartbeat every 10 seconds so the stall detector never fires
+          // during this call.
+          {
+            const hbInterval = setInterval(() => touchProgress(migrationId), 10000);
+            try {
+              rawItems = await sourceClient.getListingsByIds(pilotListingIds);
+            } finally {
+              clearInterval(hbInterval);
+            }
+          }
           log.info(`Pilot: fetched ${rawItems.length}/${pilotListingIds.length} listings by ID`);
 
           // ── Multi-unit family auto-expansion via manifest complexGroups ──────
