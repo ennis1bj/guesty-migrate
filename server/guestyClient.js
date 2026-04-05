@@ -151,7 +151,11 @@ class GuestyClient {
       return response.data;
     } catch (err) {
       if (err.response && err.response.status === 429 && retries < this.maxRetries) {
-        retryAfterMs = parseInt(err.response.headers['retry-after'] || '1', 10) * 1000;
+        const rawRetryAfter = parseInt(err.response.headers['retry-after'] || '5', 10);
+        // Cap at 60 s — a Guesty Retry-After of several minutes would silently
+        // stall the entire migration worker for longer than the stall detector's
+        // 15-minute threshold, causing the whole run to be marked failed.
+        retryAfterMs = Math.min(rawRetryAfter, 60) * 1000;
       } else {
         throw err;
       }
