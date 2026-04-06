@@ -519,14 +519,39 @@ class GuestyClient {
     return this.request('POST', '/listings', data);
   }
 
+  async buildNicknameCache() {
+    this._nicknameCache = {};
+    let skip = 0;
+    const limit = 100;
+    while (true) {
+      const data = await this.request(
+        'GET',
+        `/listings?limit=${limit}&skip=${skip}&fields=_id nickname`
+      );
+      const results = data.results || data;
+      if (!Array.isArray(results) || results.length === 0) break;
+      for (const listing of results) {
+        if (listing.nickname) this._nicknameCache[listing.nickname] = listing._id;
+      }
+      if (results.length < limit) break;
+      skip += limit;
+    }
+    return this._nicknameCache;
+  }
+
   async findListingByNickname(nickname) {
+    if (this._nicknameCache) {
+      const id = this._nicknameCache[nickname];
+      return id ? { _id: id } : null;
+    }
     try {
       const data = await this.request(
         'GET',
-        `/listings?filters[nickname]=${encodeURIComponent(nickname)}&limit=1&fields=_id nickname`
+        `/listings?filters[nickname]=${encodeURIComponent(nickname)}&limit=10&fields=_id nickname`
       );
       const results = data.results || data;
-      return Array.isArray(results) ? results[0] : null;
+      if (!Array.isArray(results)) return null;
+      return results.find(r => r.nickname === nickname) || null;
     } catch {
       return null;
     }

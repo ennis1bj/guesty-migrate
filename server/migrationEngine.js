@@ -1098,6 +1098,20 @@ async function runMigration(migrationId) {
         }
       }
 
+      // Pre-build a nickname→destId lookup for the destination account so that
+      // handleConflict can resolve "nickname already exists" errors instantly
+      // from memory instead of firing 163 individual GET /listings requests
+      // concurrently (which triggers 429s and silently returns null, leaving
+      // all conflicting listings as failures with no idMap entry).
+      if (category === 'listings') {
+        try {
+          const cache = await destClient.buildNicknameCache();
+          log.info('listings: destination nickname cache ready', { count: Object.keys(cache).length });
+        } catch (cacheErr) {
+          log.warn('listings: failed to build nickname cache — conflict resolution will fall back to API search', { error: cacheErr.message });
+        }
+      }
+
       for (const item of sourceItems) {
         const sourceId = item[categoryDef.idField];
         try {
