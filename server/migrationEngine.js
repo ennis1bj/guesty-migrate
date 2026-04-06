@@ -668,22 +668,18 @@ async function runMigration(migrationId) {
         const migratedSrcIds  = idMaps.listings ? Object.keys(idMaps.listings) : [];
 
         if (category === 'listings' && pilotListingIds?.length) {
+          // A background heartbeat keeps last_progress_at fresh throughout the
+          // entire pilot listings block — covering getListingsByIds (90+ min
+          // under heavy rate-limiting), the wantedComplexIds fallback API calls,
+          // the orphaned MTL individual-fetch loop, and the siblings fetch.
+          // Cleared in the finally block at the end of this if-block.
+          const pilotHbInterval = setInterval(() => touchProgress(migrationId), 10000);
+          try {
           // Fetch each selected listing directly by ID in parallel.
           // Replaces getAllListings() which pages through every listing on the account.
           log.info(`Pilot: fetching ${pilotListingIds.length} selected listings by ID...`, { migrationId });
           await touchProgress(migrationId);
-          // getListingsByIds can take 10+ minutes when Guesty is rate-limiting the
-          // source account (semaphore-limited but still sequential under load).
-          // Run a heartbeat every 10 seconds so the stall detector never fires
-          // during this call.
-          {
-            const hbInterval = setInterval(() => touchProgress(migrationId), 10000);
-            try {
-              rawItems = await sourceClient.getListingsByIds(pilotListingIds);
-            } finally {
-              clearInterval(hbInterval);
-            }
-          }
+          rawItems = await sourceClient.getListingsByIds(pilotListingIds);
           log.info(`Pilot: fetched ${rawItems.length}/${pilotListingIds.length} listings by ID`);
 
           // ── Multi-unit family auto-expansion via manifest complexGroups ──────
@@ -806,6 +802,7 @@ async function runMigration(migrationId) {
                 // including a `propertyIds` array — the authoritative child list.
                 // This works even when the bulk /listings API omits complexId/
                 // parentId from MTL_CHILD listings.
+                await touchProgress(migrationId);
                 const complexPropIds = await sourceClient.getComplexPropertyIds(wantedId);
                 if (complexPropIds.length > 0) {
                   let addedByComplex = 0;
@@ -823,6 +820,7 @@ async function runMigration(migrationId) {
                 }
 
                 // ── Fallback 1: Guesty complexId API filter with count-based trust ──
+                await touchProgress(migrationId);
                 const filterResults = await sourceClient.getSubUnitsForParent(
                   wantedId,
                   { totalListingCount }
@@ -947,6 +945,10 @@ async function runMigration(migrationId) {
           // Track the full set of IDs now in rawItems (original + auto-expanded)
           // so the safety filter below does not strip the newly added siblings.
           effectivePilotIds = new Set(rawItems.map(r => r._id));
+
+          } finally {
+            clearInterval(pilotHbInterval);
+          }
 
         } else if (category === 'reservations' && pilotListingIds && migratedSrcIds.length) {
           // Fetch reservations only for the listings that were actually migrated.
