@@ -1207,6 +1207,23 @@ async function runMigration(migrationId) {
         }
       }
 
+      // ── Persist idMap to DB immediately after creation loop ─────────────────
+      // The final updateStatus call at the end of the listings category only runs
+      // after spaces + calendar complete (which can take 10–20 min under heavy
+      // rate-limiting).  Snapshot the idMap now so a container kill or stall-
+      // detector event during those phases doesn't lose all creation work.
+      if (category === 'listings' && Object.keys(idMap).length > 0) {
+        const snapResults = { ...results };
+        snapResults[category] = {
+          sourceCount, migratedCount, failedCount,
+          ...(skippedCount > 0 ? { skippedCount } : {}),
+          ...(errors.length > 0 ? { errors: errors.slice(0, 20) } : {}),
+          ...(Object.keys(idMap).length > 0 ? { idMap } : {}),
+        };
+        await updateStatus(migrationId, 'running', { results: snapResults });
+        log.info(`listings: idMap snapshot persisted (${Object.keys(idMap).length} entries) before spaces migration`);
+      }
+
       // ── Parallel spaces + availability-settings migration (listings only) ───
       // Guesty's dashboard crashes when these sub-resources are absent — the UI
       // assumes at least one "space" and an availability-settings document exist
@@ -1216,6 +1233,7 @@ async function runMigration(migrationId) {
       if (category === 'listings') {
         const subPairs = Object.entries(idMap); // [[srcId, destId], ...]
         log.info(`listings: migrating spaces + availability-settings for ${subPairs.length} listing(s)`);
+        const spacesHbInterval = setInterval(() => touchProgress(migrationId), 10000);
         await Promise.allSettled(
           subPairs.map(async ([srcId, destId]) => {
             // ── Spaces ──────────────────────────────────────────────────────
@@ -1254,6 +1272,7 @@ async function runMigration(migrationId) {
             }
           })
         );
+        clearInterval(spacesHbInterval);
         log.info(`listings: spaces + availability-settings migration complete`);
       }
 
@@ -1265,6 +1284,7 @@ async function runMigration(migrationId) {
       if (category === 'listings') {
         const calPairs = Object.entries(idMap); // [[srcId, destId], ...]
         log.info(`listings: migrating calendar blocks for ${calPairs.length} listing(s) in parallel`);
+        const calHbInterval = setInterval(() => touchProgress(migrationId), 10000);
         await Promise.allSettled(
           calPairs.map(async ([srcId, destId]) => {
             try {
@@ -1281,6 +1301,7 @@ async function runMigration(migrationId) {
             } catch { /* Non-fatal — listing was created, calendar blocks best-effort */ }
           })
         );
+        clearInterval(calHbInterval);
         log.info(`listings: calendar block migration complete`);
       }
 
