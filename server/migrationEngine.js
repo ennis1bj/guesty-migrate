@@ -679,7 +679,7 @@ async function runMigration(migrationId) {
           // prior snapshot) skip the expensive fetch + MTL resolution entirely.  The
           // orphaned MTL individual-fetch loop scans ~1400 listings one-by-one and
           // takes ~21 min — pure wasted work when every listing is already mapped.
-          if (pilotListingIds.every(id => idMap[id])) {
+          if (pilotListingIds.every(id => idMaps[category]?.[id])) {
             log.info(`Pilot: all ${pilotListingIds.length} selected listing(s) already in idMap — skipping MTL resolution`, { migrationId });
             rawItems = [];
             effectivePilotIds = new Set(pilotListingIds);
