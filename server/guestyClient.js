@@ -523,25 +523,35 @@ class GuestyClient {
     const cache = {};
     let skip = 0;
     const limit = 100;
+    let pageIndex = 0;
     while (true) {
       const data = await this.request(
         'GET',
         `/listings?limit=${limit}&skip=${skip}&fields=_id,nickname`
       );
       const results = data.results || data;
-      if (!Array.isArray(results) || results.length === 0) break;
-      for (const listing of results) {
-        if (listing.nickname) cache[listing.nickname] = listing._id;
+      if (pageIndex === 0) {
+        logger.info(`buildNicknameCache: first page rawCount=${Array.isArray(results) ? results.length : 'not-array'} sample=${JSON.stringify(results?.[0] || null)}`);
       }
+      if (!Array.isArray(results) || results.length === 0) break;
+      let withNickname = 0;
+      for (const listing of results) {
+        if (listing.nickname) { cache[listing.nickname] = listing._id; withNickname++; }
+      }
+      logger.info(`buildNicknameCache: skip=${skip} returned=${results.length} withNickname=${withNickname}`);
       if (results.length < limit) break;
       skip += limit;
+      pageIndex++;
     }
     this._nicknameCache = cache;
     return this._nicknameCache;
   }
 
   async findListingByNickname(nickname) {
-    if (this._nicknameCache) {
+    // Use cache only if it was built AND has at least one entry.
+    // If the cache was built but empty (count=0, e.g. API returned no nicknames),
+    // fall through to an individual API search rather than returning null.
+    if (this._nicknameCache && Object.keys(this._nicknameCache).length > 0) {
       const id = this._nicknameCache[nickname];
       return id ? { _id: id } : null;
     }

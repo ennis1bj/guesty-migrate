@@ -1370,7 +1370,17 @@ async function runMigration(migrationId) {
       await updateStatus(migrationId, 'running', { results });
     } catch (err) {
       hasFailures = true;
-      results[category] = { sourceCount: 0, migratedCount: 0, failedCount: 0, error: err.message };
+      // Preserve any idMap built so far — this ensures the fast-path early-exit
+      // works on the next restart and prevents losing creation work on re-throw.
+      const savedIdMap = (idMaps[category] && Object.keys(idMaps[category]).length > 0)
+        ? idMaps[category]
+        : (storedResults[category]?.idMap && Object.keys(storedResults[category].idMap).length > 0)
+          ? storedResults[category].idMap
+          : null;
+      results[category] = {
+        sourceCount: 0, migratedCount: 0, failedCount: 0, error: err.message,
+        ...(savedIdMap ? { idMap: savedIdMap } : {}),
+      };
       await logCategory(migrationId, category, 'failed', 0, 0, 0, 0, [{ error: err.message }]);
     }
   }
