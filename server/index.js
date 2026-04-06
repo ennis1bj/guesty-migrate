@@ -21,7 +21,7 @@ const cors = require('cors');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
 const { pool, migrate, purgeExpiredCredentials, purgeStalePendingMigrations } = require('./db');
-const { initQueue, recoverStuckMigrations, getQueueHealth } = require('./queue');
+const { initQueue, recoverStuckMigrations, startupRecoverRunningMigrations, getQueueHealth } = require('./queue');
 const { logger, requestIdMiddleware } = require('./logger');
 
 const authRoutes = require('./routes/auth');
@@ -187,6 +187,10 @@ async function start() {
     await purgeStalePendingMigrations();
     setInterval(purgeStalePendingMigrations, 60 * 60 * 1000);
 
+    // On startup, immediately re-queue any in-progress migrations (they were
+    // killed when the container exited — the 15-min stall detector would
+    // otherwise leave them stuck before marking them failed).
+    await startupRecoverRunningMigrations();
     // Recover any stuck migrations from before restart
     await recoverStuckMigrations();
     // Also run every 5 minutes — catches jobs dropped from Redis without a restart

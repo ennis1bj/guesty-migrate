@@ -520,22 +520,23 @@ class GuestyClient {
   }
 
   async buildNicknameCache() {
-    this._nicknameCache = {};
+    const cache = {};
     let skip = 0;
     const limit = 100;
     while (true) {
       const data = await this.request(
         'GET',
-        `/listings?limit=${limit}&skip=${skip}&fields=_id nickname`
+        `/listings?limit=${limit}&skip=${skip}&fields=_id,nickname`
       );
       const results = data.results || data;
       if (!Array.isArray(results) || results.length === 0) break;
       for (const listing of results) {
-        if (listing.nickname) this._nicknameCache[listing.nickname] = listing._id;
+        if (listing.nickname) cache[listing.nickname] = listing._id;
       }
       if (results.length < limit) break;
       skip += limit;
     }
+    this._nicknameCache = cache;
     return this._nicknameCache;
   }
 

@@ -287,6 +287,35 @@ async function recoverStuckMigrations() {
 }
 
 /**
+ * On server startup, any migration in 'running' state is guaranteed to be dead
+ * (its in-process job was killed when the container exited).  Re-queue them
+ * immediately so migration progress is not lost waiting for the 15-minute stall
+ * detector to fire and mark them failed.
+ */
+async function startupRecoverRunningMigrations() {
+  try {
+    const { pool } = require('./db');
+    const runningResult = await pool.query(
+      "SELECT id, pricing_mode FROM migrations WHERE status = 'running'"
+    );
+    for (const row of runningResult.rows) {
+      logger.info(`Startup: re-queueing in-progress migration ${row.id} after server restart`);
+      await pool.query(
+        `UPDATE migrations SET status = 'paid', last_progress_at = NOW(), error_message = NULL WHERE id = $1`,
+        [row.id]
+      );
+      const priority = row.pricing_mode === 'beta' ? 1 : 10;
+      await enqueueMigration(row.id, { priority });
+    }
+    if (runningResult.rows.length > 0) {
+      logger.info(`Startup recovery: re-queued ${runningResult.rows.length} in-progress migration(s)`);
+    }
+  } catch (err) {
+    logger.error('Startup migration recovery failed', { error: err.message });
+  }
+}
+
+/**
  * Return current job execution mode info for health checks (#78).
  */
 function getQueueHealth() {
@@ -302,5 +331,6 @@ module.exports = {
   initQueue,
   enqueueMigration,
   recoverStuckMigrations,
+  startupRecoverRunningMigrations,
   getQueueHealth,
 };
