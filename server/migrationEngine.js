@@ -725,6 +725,11 @@ async function runMigration(migrationId) {
           // can stamp parentId on the fetched objects when Guesty's individual
           // GET /listings/:id response also omits parentId (same bug as bulk).
           const knownParentId = new Map();
+          // cachedSiblings: subUnitId → full listing object returned by
+          // getSubUnitsByListingId (LIST endpoint).  These objects have the same
+          // field coverage as getAllListings(), so they can be used directly
+          // without the redundant individual GET that getListingsByIds would do.
+          const cachedSiblings = new Map();
 
           for (const r of rawItems) {
             const lookupKey = r.complexId || r._id; // sub-unit: use parent key; parent: use own id
@@ -890,10 +895,11 @@ async function runMigration(migrationId) {
           //      a dedicated endpoint returning the sub-unit objects directly.
           // Both approaches query by the MTL listing's own ID, not complexId.
           if (missingIds.size === 0) {
-            const mtlListings = rawItems.filter(
-              r => r.type === 'MTL' || r.listingType === 'MTL' ||
-                   (Array.isArray(r.subListingsIds) && r.subListingsIds.length > 0)
-            );
+            const mtlListings = rawItems.filter(r => {
+              if (r.type === 'MTL_CHILD' || r.listingType === 'MTL_CHILD') return false;
+              return r.type === 'MTL' || r.listingType === 'MTL' ||
+                     (Array.isArray(r.subListingsIds) && r.subListingsIds.length > 0);
+            });
             for (const mtl of mtlListings) {
               await touchProgress(migrationId);
               const subUnits = await sourceClient.getSubUnitsByListingId(mtl._id);
@@ -904,6 +910,7 @@ async function runMigration(migrationId) {
                   missingIds.add(subId);
                   seenIds.add(subId);
                   knownParentId.set(subId, mtl._id);
+                  cachedSiblings.set(subId, su);
                   added++;
                 }
               }
@@ -915,7 +922,20 @@ async function runMigration(migrationId) {
 
           if (missingIds.size > 0) {
             await touchProgress(migrationId);
-            const siblings = await sourceClient.getListingsByIds([...missingIds]);
+
+            // Separate IDs already cached from Fallback 3 (sub-unit discovery
+            // returned their full objects) from any IDs that still need fetching.
+            const toFetch = [...missingIds].filter(id => !cachedSiblings.has(id));
+            let fetched = [];
+            if (toFetch.length > 0) {
+              fetched = await sourceClient.getListingsByIds(toFetch);
+            } else {
+              log.info(`Pilot: all ${missingIds.size} sibling(s) already cached from sub-unit discovery — skipping re-fetch`);
+            }
+            const siblings = [
+              ...[...missingIds].filter(id => cachedSiblings.has(id)).map(id => cachedSiblings.get(id)),
+              ...fetched,
+            ];
 
             // ── Stamp parentId on sub-units that Guesty omits it from ─────────
             // Guesty's GET /listings/:id (individual fetch) also returns MTL_CHILD
