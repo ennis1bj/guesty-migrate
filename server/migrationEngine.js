@@ -675,6 +675,15 @@ async function runMigration(migrationId) {
           // Cleared in the finally block at the end of this if-block.
           const pilotHbInterval = setInterval(() => touchProgress(migrationId), 10000);
           try {
+          // Fast path: if all selected listings are already in idMap (restored from a
+          // prior snapshot) skip the expensive fetch + MTL resolution entirely.  The
+          // orphaned MTL individual-fetch loop scans ~1400 listings one-by-one and
+          // takes ~21 min — pure wasted work when every listing is already mapped.
+          if (pilotListingIds.every(id => idMap[id])) {
+            log.info(`Pilot: all ${pilotListingIds.length} selected listing(s) already in idMap — skipping MTL resolution`, { migrationId });
+            rawItems = [];
+            effectivePilotIds = new Set(pilotListingIds);
+          } else {
           // Fetch each selected listing directly by ID in parallel.
           // Replaces getAllListings() which pages through every listing on the account.
           log.info(`Pilot: fetching ${pilotListingIds.length} selected listings by ID...`, { migrationId });
@@ -965,6 +974,7 @@ async function runMigration(migrationId) {
           // Track the full set of IDs now in rawItems (original + auto-expanded)
           // so the safety filter below does not strip the newly added siblings.
           effectivePilotIds = new Set(rawItems.map(r => r._id));
+          } // end else — idMap early-exit fast path
 
           } finally {
             clearInterval(pilotHbInterval);
