@@ -527,7 +527,7 @@ class GuestyClient {
     while (true) {
       const data = await this.request(
         'GET',
-        `/listings?limit=${limit}&skip=${skip}&fields=_id,nickname`
+        `/listings?limit=${limit}&skip=${skip}&fields=_id,nickname,internalName`
       );
       const results = data.results || data;
       if (pageIndex === 0) {
@@ -536,7 +536,8 @@ class GuestyClient {
       if (!Array.isArray(results) || results.length === 0) break;
       let withNickname = 0;
       for (const listing of results) {
-        if (listing.nickname) { cache[listing.nickname] = listing._id; withNickname++; }
+        const n = listing.nickname || listing.internalName;
+        if (n) { cache[n] = listing._id; withNickname++; }
       }
       logger.info(`buildNicknameCache: skip=${skip} returned=${results.length} withNickname=${withNickname}`);
       if (results.length < limit) break;
@@ -558,11 +559,16 @@ class GuestyClient {
     try {
       const data = await this.request(
         'GET',
-        `/listings?filters[nickname]=${encodeURIComponent(nickname)}&limit=10&fields=_id nickname`
+        `/listings?filters[nickname]=${encodeURIComponent(nickname)}&limit=10`
       );
       const results = data.results || data;
-      if (!Array.isArray(results)) return null;
-      return results.find(r => r.nickname === nickname) || null;
+      if (!Array.isArray(results) || results.length === 0) return null;
+      // Trust the server-side filter: results were returned because the nickname matched.
+      // The API may not include the 'nickname' field in the response payload, so avoid
+      // requiring r.nickname === nickname (which always fails when the field is absent).
+      return results.find(r =>
+        r.nickname === nickname || r.internalName === nickname
+      ) || results[0];
     } catch {
       return null;
     }
