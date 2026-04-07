@@ -78,7 +78,7 @@ interface MigrationStatus {
   id: string;
   status: string;
   manifest: Record<string, number>;
-  results: Record<string, { sourceCount?: number; migratedCount?: number; failedCount?: number; idMap?: Record<string, string> }> | null;
+  results: Record<string, { sourceCount?: number; migratedCount?: number; failedCount?: number; skippedCount?: number; idMap?: Record<string, string> }> | null;
   diff_report: Record<string, {
     source?: number;
     destination?: number;
