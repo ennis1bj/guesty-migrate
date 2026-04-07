@@ -880,12 +880,42 @@ async function runMigration(migrationId) {
           // Cleared in the finally block at the end of this if-block.
           const pilotHbInterval = setInterval(() => touchProgress(migrationId), 10000);
           try {
-          // Fetch each selected listing directly by ID in parallel.
-          // Replaces getAllListings() which pages through every listing on the account.
-          log.info(`Pilot: fetching ${pilotListingIds.length} selected listings by ID...`, { migrationId });
-          await touchProgress(migrationId);
-          rawItems = await sourceClient.getListingsByIds(pilotListingIds);
-          log.info(`Pilot: fetched ${rawItems.length}/${pilotListingIds.length} listings by ID`);
+          // ── Partial-extract resumability: load already-extracted IDs from DB ──
+          // If a prior run fetched and stored some listing rows but was interrupted
+          // before writing the extraction marker, we load those rows from DB and
+          // only fetch the IDs that are genuinely missing from migration_source_data.
+          const alreadyExtractedMap = new Map(); // sourceId → listing data object
+          {
+            const extractedSet = await getExtractedSourceIds(migrationId, 'listing');
+            extractedSet.delete('__complete__'); // ignore the marker row
+            if (extractedSet.size > 0) {
+              const dbRows = await loadSourceData(migrationId, 'listing');
+              for (const row of dbRows) {
+                if (row.sourceId !== '__complete__') alreadyExtractedMap.set(row.sourceId, row.data);
+              }
+              log.info(`ETL: ${alreadyExtractedMap.size} listing(s) already in DB — fetching only missing IDs`, { migrationId });
+            }
+          }
+
+          // Fetch each selected listing directly by ID in parallel — only for IDs
+          // not already stored in migration_source_data from a prior interrupted run.
+          const missingPilotIds = pilotListingIds.filter(id => !alreadyExtractedMap.has(id));
+          let rawItemsFromApi = [];
+          if (missingPilotIds.length > 0) {
+            log.info(`Pilot: fetching ${missingPilotIds.length}/${pilotListingIds.length} missing listing(s) by ID...`, { migrationId });
+            await touchProgress(migrationId);
+            rawItemsFromApi = await sourceClient.getListingsByIds(missingPilotIds);
+            log.info(`Pilot: fetched ${rawItemsFromApi.length}/${missingPilotIds.length} from source API`);
+            // Upsert immediately so partial-extraction progress survives next restart
+            for (const item of rawItemsFromApi) {
+              if (item._id) await upsertSourceData(migrationId, 'listing', item._id, item);
+            }
+          } else {
+            log.info(`Pilot: all ${pilotListingIds.length} selected listing(s) already in DB — skipping source API fetch`, { migrationId });
+          }
+          // Combine DB-loaded and freshly-fetched items into rawItems
+          rawItems = [...alreadyExtractedMap.values(), ...rawItemsFromApi];
+          log.info(`Pilot: ${rawItems.length} listing(s) assembled (${alreadyExtractedMap.size} from DB, ${rawItemsFromApi.length} from API)`);
 
           // ── Multi-unit family auto-expansion via manifest complexGroups ──────
           // The preflight stores a complexId → [listingId, ...] map in the
@@ -1070,7 +1100,13 @@ async function runMigration(migrationId) {
                   for (let oi = 0; oi < orphanedIds.length; oi++) {
                     await touchProgress(migrationId);
                     let ol = null;
-                    try { ol = await sourceClient.request('GET', `/listings/${orphanedIds[oi]}`); } catch { /* skip on error */ }
+                    // Use cached DB data if available — avoids source API call for
+                    // listings already extracted in a prior interrupted run.
+                    if (alreadyExtractedMap.has(orphanedIds[oi])) {
+                      ol = alreadyExtractedMap.get(orphanedIds[oi]);
+                    } else {
+                      try { ol = await sourceClient.request('GET', `/listings/${orphanedIds[oi]}`); } catch { /* skip on error */ }
+                    }
                     if (ol) {
                       const cId = ol.complexId || ol.parentId;
                       if (cId && wantedComplexIds.has(cId) && !seenIds.has(ol._id)) {
@@ -1128,17 +1164,22 @@ async function runMigration(migrationId) {
           if (missingIds.size > 0) {
             await touchProgress(migrationId);
 
-            // Separate IDs already cached from Fallback 3 (sub-unit discovery
-            // returned their full objects) from any IDs that still need fetching.
-            const toFetch = [...missingIds].filter(id => !cachedSiblings.has(id));
+            // Separate IDs already cached from Fallback 3 or already in DB
+            // from any IDs that genuinely need a source API call.
+            const toFetch = [...missingIds].filter(id => !cachedSiblings.has(id) && !alreadyExtractedMap.has(id));
             let fetched = [];
             if (toFetch.length > 0) {
               fetched = await sourceClient.getListingsByIds(toFetch);
+              // Upsert siblings immediately for per-ID partial-extract resumability
+              for (const item of fetched) {
+                if (item._id) await upsertSourceData(migrationId, 'listing', item._id, item);
+              }
             } else {
-              log.info(`Pilot: all ${missingIds.size} sibling(s) already cached from sub-unit discovery — skipping re-fetch`);
+              log.info(`Pilot: all ${missingIds.size} sibling(s) from cache/DB — skipping source API fetch`);
             }
             const siblings = [
               ...[...missingIds].filter(id => cachedSiblings.has(id)).map(id => cachedSiblings.get(id)),
+              ...[...missingIds].filter(id => alreadyExtractedMap.has(id) && !cachedSiblings.has(id)).map(id => alreadyExtractedMap.get(id)),
               ...fetched,
             ];
 
@@ -1175,21 +1216,17 @@ async function runMigration(migrationId) {
             clearInterval(pilotHbInterval);
           }
 
-          // ── ETL: Store extracted listing data + sub-resources to DB ──────────
-          // Runs on any run where etlLoadedFromDb=false (no marker present).
-          // Upserts are idempotent so re-running after a partial extract is safe.
+          // ── ETL: Sub-resource extraction + completion marker ──────────────────
+          // Listing rows are upserted incrementally above (initial fetch + siblings).
+          // Run sub-resource extraction (spaces/availability/calendar) — resumable
+          // per-listing via getExtractedSourceIds.  Write the completion marker ONLY
+          // after sub-resource extraction finishes so the marker truthfully represents
+          // a fully extracted dataset.
           if (Array.isArray(rawItems) && rawItems.length > 0) {
-            log.info(`ETL: storing ${rawItems.length} listing(s) to DB (pilot mode)`, { migrationId });
-            for (const item of rawItems) {
-              if (item._id) await upsertSourceData(migrationId, 'listing', item._id, item);
-            }
             await extractListingSubResources(migrationId, rawItems, sourceClient, log);
-            // Write completion marker ONLY after all rows + sub-resources are stored.
-            // The marker's presence is the signal that extraction is fully complete
-            // and subsequent restarts can skip source API calls entirely.
             await upsertSourceData(migrationId, 'listing_extract_marker', '__complete__',
               { completedAt: new Date().toISOString(), count: rawItems.length });
-            log.info(`ETL: extraction complete — marker written for ${rawItems.length} listing(s)`, { migrationId });
+            log.info(`ETL: extraction complete — marker written for ${rawItems.length} listing(s) (pilot mode)`, { migrationId });
           }
 
         } else if (!etlLoadedFromDb && category === 'reservations' && pilotListingIds && migratedSrcIds.length) {
