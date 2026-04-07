@@ -201,6 +201,63 @@ const migrate = async () => {
       ALTER TABLE migrations ADD COLUMN IF NOT EXISTS last_progress_at TIMESTAMPTZ;
     `);
 
+    // ── ETL: Source data cache ─────────────────────────────────────────────
+    // Stores raw source Guesty data extracted from the source account, one row
+    // per (migration, category, source_id).
+    //
+    // category values:
+    //   'listing'       — full listing JSON from source account
+    //   'spaces'        — listing spaces array (from GET /listings/:id/spaces)
+    //   'availability'  — listing availability settings object
+    //   'calendar'      — calendar block day array (blocked dates)
+    //
+    // Data is extracted ONCE on first run and reused on all subsequent restarts,
+    // eliminating repeated source API calls (the 21-min MTL scan, OAuth timeout
+    // prone spaces fetches, etc.).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS migration_source_data (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        migration_id UUID REFERENCES migrations(id) ON DELETE CASCADE,
+        category TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        data JSONB NOT NULL,
+        extracted_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS migration_source_data_lookup
+        ON migration_source_data (migration_id, category, source_id);
+    `);
+
+    // ── ETL: Load log ─────────────────────────────────────────────────────
+    // Tracks the load status of each item posted to the destination account,
+    // one row per (migration, category, source_id).
+    //
+    // category values:
+    //   'listing_create'    — listing created in destination
+    //   'spaces_load'       — spaces applied to destination listing
+    //   'availability_load' — availability settings applied to destination listing
+    //   'calendar_load'     — calendar blocks applied to destination listing
+    //
+    // Replaces the fragile JSONB idMap blob with per-item DB tracking so that
+    // a restart resumes from exactly where it left off at the listing level.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS migration_load_log (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        migration_id UUID REFERENCES migrations(id) ON DELETE CASCADE,
+        category TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        dest_id TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        error TEXT,
+        loaded_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS migration_load_log_lookup
+        ON migration_load_log (migration_id, category, source_id);
+    `);
+
     logger.info('Database migrations completed successfully');
 
     // ── Auto-seed admin from environment variables ──────────────────────────
@@ -247,6 +304,28 @@ const purgeExpiredCredentials = async () => {
     `);
     if (result.rowCount > 0) {
       logger.info(`Purged credentials from ${result.rowCount} expired migration(s)`);
+    }
+
+    // Purge ETL source data and load log for old completed migrations (storage cleanup).
+    // Retain for 30 days after completion in case the user needs to reprocess or debug.
+    const etlResult = await pool.query(`
+      DELETE FROM migration_source_data
+      WHERE migration_id IN (
+        SELECT id FROM migrations
+        WHERE status IN ('complete', 'complete_with_errors', 'failed')
+          AND completed_at < NOW() - INTERVAL '30 days'
+      )
+    `);
+    const loadLogResult = await pool.query(`
+      DELETE FROM migration_load_log
+      WHERE migration_id IN (
+        SELECT id FROM migrations
+        WHERE status IN ('complete', 'complete_with_errors', 'failed')
+          AND completed_at < NOW() - INTERVAL '30 days'
+      )
+    `);
+    if ((etlResult.rowCount || 0) + (loadLogResult.rowCount || 0) > 0) {
+      logger.info(`Purged ETL data: ${etlResult.rowCount} source rows, ${loadLogResult.rowCount} load log rows`);
     }
   } catch (err) {
     logger.error('Failed to purge expired credentials', { error: err.message });

@@ -103,6 +103,179 @@ function groupContiguousDays(days) {
   return ranges;
 }
 
+// ── ETL helpers ────────────────────────────────────────────────────────────────
+// These functions back the Extract-Transform-Load architecture for the listings
+// category.  Source data is written to migration_source_data ONCE and reused on
+// all subsequent restarts; load progress is tracked per-item in migration_load_log.
+
+/**
+ * Upsert a source data row.  category is one of: 'listing', 'spaces',
+ * 'availability', 'calendar'.
+ */
+async function upsertSourceData(migrationId, category, sourceId, data) {
+  await pool.query(
+    `INSERT INTO migration_source_data (migration_id, category, source_id, data)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (migration_id, category, source_id)
+     DO UPDATE SET data = EXCLUDED.data, extracted_at = NOW()`,
+    [migrationId, category, sourceId, JSON.stringify(data)]
+  );
+}
+
+/** Count how many source rows exist for a migration+category. */
+async function getSourceDataCount(migrationId, category) {
+  const result = await pool.query(
+    `SELECT COUNT(*) FROM migration_source_data WHERE migration_id = $1 AND category = $2`,
+    [migrationId, category]
+  );
+  return parseInt(result.rows[0].count, 10);
+}
+
+/** Return a Set of source_ids already extracted for a migration+category. */
+async function getExtractedSourceIds(migrationId, category) {
+  const result = await pool.query(
+    `SELECT source_id FROM migration_source_data WHERE migration_id = $1 AND category = $2`,
+    [migrationId, category]
+  );
+  return new Set(result.rows.map(r => r.source_id));
+}
+
+/**
+ * Load all source data rows for a migration+category.
+ * Returns an array of { sourceId, data } objects.
+ */
+async function loadSourceData(migrationId, category) {
+  const result = await pool.query(
+    `SELECT source_id, data FROM migration_source_data
+     WHERE migration_id = $1 AND category = $2
+     ORDER BY extracted_at ASC`,
+    [migrationId, category]
+  );
+  return result.rows.map(r => ({ sourceId: r.source_id, data: r.data }));
+}
+
+/**
+ * Upsert a load log entry.
+ * category is one of: 'listing_create', 'spaces_load', 'availability_load', 'calendar_load'.
+ * status is one of: 'loaded', 'skipped', 'failed'.
+ */
+async function upsertLoadLog(migrationId, category, sourceId, destId, status, error = null) {
+  await pool.query(
+    `INSERT INTO migration_load_log (migration_id, category, source_id, dest_id, status, error, loaded_at)
+     VALUES ($1, $2, $3, $4, $5, $6, NOW())
+     ON CONFLICT (migration_id, category, source_id)
+     DO UPDATE SET dest_id = EXCLUDED.dest_id, status = EXCLUDED.status,
+                   error = EXCLUDED.error, loaded_at = NOW()`,
+    [migrationId, category, sourceId, destId || null, status, error || null]
+  );
+}
+
+/**
+ * Return a Set of source_ids already loaded (status = 'loaded' or 'skipped')
+ * for a migration+category.
+ */
+async function getLoadedSourceIds(migrationId, category) {
+  const result = await pool.query(
+    `SELECT source_id FROM migration_load_log
+     WHERE migration_id = $1 AND category = $2 AND status IN ('loaded', 'skipped')`,
+    [migrationId, category]
+  );
+  return new Set(result.rows.map(r => r.source_id));
+}
+
+/**
+ * Build an idMap (sourceId → destId) from the load log for listing_create rows.
+ * Used to restore the idMap on restart without relying on the JSONB blob.
+ */
+async function buildIdMapFromLoadLog(migrationId) {
+  const result = await pool.query(
+    `SELECT source_id, dest_id FROM migration_load_log
+     WHERE migration_id = $1 AND category = 'listing_create'
+       AND status IN ('loaded', 'skipped') AND dest_id IS NOT NULL`,
+    [migrationId]
+  );
+  const idMap = {};
+  for (const row of result.rows) {
+    idMap[row.source_id] = row.dest_id;
+  }
+  return idMap;
+}
+
+/**
+ * Extract spaces, availability settings, and calendar blocks from source Guesty
+ * for all listings in rawItems that have not yet been extracted.  Stores each
+ * result to migration_source_data so subsequent restarts can skip source API calls.
+ *
+ * Designed to be resumable: already-extracted source_ids are skipped.
+ * Errors on individual listings are non-fatal (empty data stored so load phase
+ * can still proceed without blocking the migration).
+ */
+async function extractListingSubResources(migrationId, rawItems, sourceClient, log) {
+  const alreadyExtractedSpaces = await getExtractedSourceIds(migrationId, 'spaces');
+  const alreadyExtractedAvail  = await getExtractedSourceIds(migrationId, 'availability');
+  const alreadyExtractedCal    = await getExtractedSourceIds(migrationId, 'calendar');
+
+  const toExtract = rawItems.filter(item =>
+    item._id && (
+      !alreadyExtractedSpaces.has(item._id) ||
+      !alreadyExtractedAvail.has(item._id)  ||
+      !alreadyExtractedCal.has(item._id)
+    )
+  );
+
+  if (toExtract.length === 0) {
+    log.info('ETL: all sub-resources already extracted — skipping');
+    return;
+  }
+
+  log.info(`ETL: extracting sub-resources for ${toExtract.length}/${rawItems.length} listing(s) (spaces/availability/calendar)`);
+  const hb = setInterval(() => touchProgress(migrationId), 10000);
+  try {
+    for (let i = 0; i < toExtract.length; i++) {
+      const srcId = toExtract[i]._id;
+      await touchProgress(migrationId);
+
+      if (!alreadyExtractedSpaces.has(srcId)) {
+        try {
+          const spaces = await sourceClient.getListingSpaces(srcId);
+          await upsertSourceData(migrationId, 'spaces', srcId, Array.isArray(spaces) ? spaces : []);
+        } catch (e) {
+          log.warn(`ETL: spaces extract failed for ${srcId} — storing empty`, { error: e.message });
+          await upsertSourceData(migrationId, 'spaces', srcId, []);
+        }
+      }
+
+      if (!alreadyExtractedAvail.has(srcId)) {
+        try {
+          const avail = await sourceClient.getListingAvailabilitySettings(srcId);
+          await upsertSourceData(migrationId, 'availability', srcId,
+            (avail && typeof avail === 'object') ? avail : {});
+        } catch (e) {
+          log.warn(`ETL: availability extract failed for ${srcId} — storing empty`, { error: e.message });
+          await upsertSourceData(migrationId, 'availability', srcId, {});
+        }
+      }
+
+      if (!alreadyExtractedCal.has(srcId)) {
+        try {
+          const blocks = await sourceClient.getListingCalendarBlocks(srcId);
+          await upsertSourceData(migrationId, 'calendar', srcId, Array.isArray(blocks) ? blocks : []);
+        } catch (e) {
+          log.warn(`ETL: calendar extract failed for ${srcId} — storing empty`, { error: e.message });
+          await upsertSourceData(migrationId, 'calendar', srcId, []);
+        }
+      }
+
+      if ((i + 1) % 10 === 0 || i + 1 === toExtract.length) {
+        log.info(`ETL: extracted sub-resources for ${i + 1}/${toExtract.length} listings`);
+      }
+    }
+  } finally {
+    clearInterval(hb);
+  }
+  log.info(`ETL: sub-resource extraction complete (${toExtract.length} listings)`);
+}
+
 /**
  * Classify listings into standalone, parent (MTL/complex), and sub-units.
  */
@@ -667,23 +840,29 @@ async function runMigration(migrationId) {
         const pilotListingIds = migration.selected_listing_ids;
         const migratedSrcIds  = idMaps.listings ? Object.keys(idMaps.listings) : [];
 
-        if (category === 'listings' && pilotListingIds?.length) {
+        // ── ETL: Load from DB if listing data is already extracted ─────────────
+        // On first run: rawItems comes from the source Guesty API below.
+        // On all subsequent runs (server restarts): rawItems loads from DB — this
+        // eliminates the 21-min MTL scan, OAuth-timeout-prone spaces fetches, etc.
+        let etlLoadedFromDb = false;
+        if (category === 'listings') {
+          const etlListingCount = await getSourceDataCount(migrationId, 'listing');
+          if (etlListingCount > 0) {
+            log.info(`ETL: ${etlListingCount} listings already extracted — loading from DB, skipping source API`, { migrationId });
+            rawItems = (await loadSourceData(migrationId, 'listing')).map(r => r.data);
+            effectivePilotIds = new Set(rawItems.map(r => r._id));
+            etlLoadedFromDb = true;
+          }
+        }
+
+        if (!etlLoadedFromDb && category === 'listings' && pilotListingIds?.length) {
           // A background heartbeat keeps last_progress_at fresh throughout the
           // entire pilot listings block — covering getListingsByIds (90+ min
           // under heavy rate-limiting), the wantedComplexIds fallback API calls,
-          // the orphaned MTL individual-fetch loop, and the siblings fetch.
+          // the orphaned MTL individual-fetch loop, siblings fetch, and ETL extraction.
           // Cleared in the finally block at the end of this if-block.
           const pilotHbInterval = setInterval(() => touchProgress(migrationId), 10000);
           try {
-          // Fast path: if all selected listings are already in idMap (restored from a
-          // prior snapshot) skip the expensive fetch + MTL resolution entirely.  The
-          // orphaned MTL individual-fetch loop scans ~1400 listings one-by-one and
-          // takes ~21 min — pure wasted work when every listing is already mapped.
-          if (pilotListingIds.every(id => idMaps[category]?.[id])) {
-            log.info(`Pilot: all ${pilotListingIds.length} selected listing(s) already in idMap — skipping MTL resolution`, { migrationId });
-            rawItems = [];
-            effectivePilotIds = new Set(pilotListingIds);
-          } else {
           // Fetch each selected listing directly by ID in parallel.
           // Replaces getAllListings() which pages through every listing on the account.
           log.info(`Pilot: fetching ${pilotListingIds.length} selected listings by ID...`, { migrationId });
@@ -974,13 +1153,23 @@ async function runMigration(migrationId) {
           // Track the full set of IDs now in rawItems (original + auto-expanded)
           // so the safety filter below does not strip the newly added siblings.
           effectivePilotIds = new Set(rawItems.map(r => r._id));
-          } // end else — idMap early-exit fast path
 
           } finally {
             clearInterval(pilotHbInterval);
           }
 
-        } else if (category === 'reservations' && pilotListingIds && migratedSrcIds.length) {
+          // ── ETL: Store extracted listing data + sub-resources to DB ──────────
+          // Runs only on the first extraction (etlListingCount was 0 above).
+          // Subsequent restarts hit the etlListingCount > 0 early-exit above.
+          if (Array.isArray(rawItems) && rawItems.length > 0) {
+            log.info(`ETL: storing ${rawItems.length} listing(s) to DB (pilot mode)`, { migrationId });
+            for (const item of rawItems) {
+              if (item._id) await upsertSourceData(migrationId, 'listing', item._id, item);
+            }
+            await extractListingSubResources(migrationId, rawItems, sourceClient, log);
+          }
+
+        } else if (!etlLoadedFromDb && category === 'reservations' && pilotListingIds && migratedSrcIds.length) {
           // Fetch reservations only for the listings that were actually migrated.
           rawItems = await sourceClient.getReservationsByListingIds(migratedSrcIds);
           log.info(`Pilot: fetched ${rawItems.length} reservations for ${migratedSrcIds.length} listing(s)`);
@@ -990,13 +1179,22 @@ async function runMigration(migrationId) {
           rawItems = await sourceClient.getTasksByListingIds(migratedSrcIds);
           log.info(`Pilot: fetched ${rawItems.length} tasks for ${migratedSrcIds.length} listing(s)`);
 
-        } else {
+        } else if (!etlLoadedFromDb) {
           // Full-account fetch for non-pilot migrations and account-level categories
           // (fees, owners, guests, saved_replies, rate_strategies, custom_fields).
           await touchProgress(migrationId);
           rawItems = categoryDef.getAll
             ? await categoryDef.getAll(sourceClient)
             : [];
+
+          // ── ETL: Store listings data to DB for full-account (non-pilot) migrations ──
+          if (category === 'listings' && Array.isArray(rawItems) && rawItems.length > 0) {
+            log.info(`ETL: storing ${rawItems.length} listing(s) to DB (full-account mode)`, { migrationId });
+            for (const item of rawItems) {
+              if (item._id) await upsertSourceData(migrationId, 'listing', item._id, item);
+            }
+            await extractListingSubResources(migrationId, rawItems, sourceClient, log);
+          }
         }
       } catch (fetchErr) {
         const status = fetchErr.response?.status;
@@ -1068,10 +1266,33 @@ async function runMigration(migrationId) {
 
       // Restore any partial idMap from a previous interrupted run so that
       // re-runs can skip items already created in the destination account.
-      const partialStoredMap = storedResults[category]?.idMap;
-      const idMap = (partialStoredMap && typeof partialStoredMap === 'object')
-        ? { ...partialStoredMap }
-        : {};
+      // Priority: ETL load log (DB) → JSONB blob (legacy snapshot).
+      // The ETL load log is always up-to-date after restarts; the JSONB blob
+      // is a fallback for migrations that predate the ETL architecture.
+      let idMap = {};
+      if (category === 'listings') {
+        const etlIdMap = await buildIdMapFromLoadLog(migrationId);
+        if (Object.keys(etlIdMap).length > 0) {
+          idMap = etlIdMap;
+          log.info(`listings: restored idMap from ETL load log (${Object.keys(idMap).length} entries)`);
+        } else {
+          // Fallback: legacy JSONB blob stored in migration results
+          const partialStoredMap = storedResults[category]?.idMap;
+          if (partialStoredMap && typeof partialStoredMap === 'object') {
+            idMap = { ...partialStoredMap };
+            log.info(`listings: restored idMap from JSONB blob (${Object.keys(idMap).length} entries) — backfilling ETL load log`);
+            // Backfill the load log so future restarts use ETL path
+            for (const [srcId, destId] of Object.entries(idMap)) {
+              await upsertLoadLog(migrationId, 'listing_create', srcId, destId, 'loaded');
+            }
+          }
+        }
+      } else {
+        const partialStoredMap = storedResults[category]?.idMap;
+        idMap = (partialStoredMap && typeof partialStoredMap === 'object')
+          ? { ...partialStoredMap }
+          : {};
+      }
       if (Object.keys(idMap).length > 0) {
         log.info(`${category}: resuming with ${Object.keys(idMap).length} already-created item(s) from partial run`);
       }
@@ -1164,6 +1385,10 @@ async function runMigration(migrationId) {
           const newId = created._id || created.id;
           if (sourceId && newId) {
             idMap[sourceId] = newId;
+            // ETL load log: record successful listing creation so idMap survives restarts
+            if (category === 'listings') {
+              await upsertLoadLog(migrationId, 'listing_create', sourceId, newId, 'loaded');
+            }
           }
           migratedCount++;
 
@@ -1201,7 +1426,14 @@ async function runMigration(migrationId) {
           if (categoryDef.handleConflict) {
             try {
               const handled = await categoryDef.handleConflict(err, item, destClient, idMap);
-              if (handled) { migratedCount++; continue; }
+              if (handled) {
+                migratedCount++;
+                // ETL load log: record conflict-handled listing so idMap survives restarts
+                if (category === 'listings' && sourceId && idMap[sourceId]) {
+                  await upsertLoadLog(migrationId, 'listing_create', sourceId, idMap[sourceId], 'loaded');
+                }
+                continue;
+              }
             } catch { /* fall through */ }
           }
           if (category === 'guests' && err.response?.status === 409) {
@@ -1248,85 +1480,119 @@ async function runMigration(migrationId) {
         log.info(`listings: idMap snapshot persisted (${Object.keys(idMap).length} entries) before spaces migration`);
       }
 
-      // ── Parallel spaces + availability-settings migration (listings only) ───
-      // Guesty's dashboard crashes when these sub-resources are absent — the UI
-      // assumes at least one "space" and an availability-settings document exist
-      // for every listing.  Migrate them after the creation loop so every listing
-      // ID is in idMap, then apply to all entries.  Best-effort: errors are
-      // logged but never fail the overall listing migration.
+      // ── Sequential spaces + availability-settings migration (listings only) ──
+      // ETL load phase: read pre-extracted data from migration_source_data.
+      // Guesty's dashboard crashes when sub-resources are absent — the UI assumes
+      // at least one "space" and an availability-settings document exist per listing.
+      // Sequential (not parallel) so progress is tracked per-item and resumable.
       if (category === 'listings') {
         const subPairs = Object.entries(idMap); // [[srcId, destId], ...]
-        log.info(`listings: migrating spaces + availability-settings for ${subPairs.length} listing(s)`);
+        log.info(`listings: migrating spaces + availability-settings for ${subPairs.length} listing(s) (ETL load from DB)`);
         const spacesHbInterval = setInterval(() => touchProgress(migrationId), 10000);
-        await Promise.allSettled(
-          subPairs.map(async ([srcId, destId]) => {
+
+        const alreadyLoadedSpaces = await getLoadedSourceIds(migrationId, 'spaces_load');
+        const alreadyLoadedAvail  = await getLoadedSourceIds(migrationId, 'availability_load');
+
+        // Pre-load all extracted data into Maps to avoid N² DB calls in the loop
+        const allSpacesRows = await loadSourceData(migrationId, 'spaces');
+        const spacesRowMap  = new Map(allSpacesRows.map(r => [r.sourceId, r.data]));
+        const allAvailRows  = await loadSourceData(migrationId, 'availability');
+        const availRowMap   = new Map(allAvailRows.map(r => [r.sourceId, r.data]));
+
+        let spacesLoaded = 0;
+        let availLoaded = 0;
+        try {
+          for (const [srcId, destId] of subPairs) {
             // ── Spaces ──────────────────────────────────────────────────────
-            try {
-              const spaces = await sourceClient.getListingSpaces(srcId);
-              if (Array.isArray(spaces) && spaces.length > 0) {
-                for (const space of spaces) {
-                  const cleanedSpace = stripFieldsDeep(space);
-                  try {
-                    await destClient.createListingSpace(destId, cleanedSpace);
-                  } catch (spErr) {
-                    // 409 = space already exists — treat as success
-                    if (spErr.response?.status !== 409) {
-                      log.warn(`listings: space create failed for dest ${destId}`, { error: spErr.response?.data?.message || spErr.message });
+            if (!alreadyLoadedSpaces.has(srcId)) {
+              try {
+                const spaces = spacesRowMap.get(srcId) || [];
+                if (Array.isArray(spaces) && spaces.length > 0) {
+                  for (const space of spaces) {
+                    const cleanedSpace = stripFieldsDeep(space);
+                    try {
+                      await destClient.createListingSpace(destId, cleanedSpace);
+                    } catch (spErr) {
+                      if (spErr.response?.status !== 409) {
+                        log.warn(`listings: space create failed for dest ${destId}`, { error: spErr.response?.data?.message || spErr.message });
+                      }
                     }
                   }
                 }
+                await upsertLoadLog(migrationId, 'spaces_load', srcId, destId, 'loaded');
+                spacesLoaded++;
+              } catch (err) {
+                log.warn(`listings: spaces load failed for source ${srcId}`, { error: err.message });
+                await upsertLoadLog(migrationId, 'spaces_load', srcId, destId, 'failed', err.message);
               }
-            } catch (err) {
-              log.warn(`listings: failed to fetch spaces for source ${srcId}`, { error: err.message });
             }
 
             // ── Availability settings ────────────────────────────────────────
-            try {
-              const avail = await sourceClient.getListingAvailabilitySettings(srcId);
-              if (avail && typeof avail === 'object') {
-                const cleanedAvail = stripFieldsDeep(avail);
-                try {
-                  await destClient.updateListingAvailabilitySettings(destId, cleanedAvail);
-                } catch (avErr) {
-                  log.warn(`listings: availability-settings update failed for dest ${destId}`, { error: avErr.response?.data?.message || avErr.message });
+            if (!alreadyLoadedAvail.has(srcId)) {
+              try {
+                const avail = availRowMap.get(srcId) || {};
+                if (avail && typeof avail === 'object' && Object.keys(avail).length > 0) {
+                  const cleanedAvail = stripFieldsDeep(avail);
+                  try {
+                    await destClient.updateListingAvailabilitySettings(destId, cleanedAvail);
+                  } catch (avErr) {
+                    log.warn(`listings: availability-settings update failed for dest ${destId}`, { error: avErr.response?.data?.message || avErr.message });
+                  }
                 }
+                await upsertLoadLog(migrationId, 'availability_load', srcId, destId, 'loaded');
+                availLoaded++;
+              } catch (err) {
+                log.warn(`listings: availability load failed for source ${srcId}`, { error: err.message });
+                await upsertLoadLog(migrationId, 'availability_load', srcId, destId, 'failed', err.message);
               }
-            } catch (err) {
-              log.warn(`listings: failed to fetch availability-settings for source ${srcId}`, { error: err.message });
             }
-          })
-        );
-        clearInterval(spacesHbInterval);
-        log.info(`listings: spaces + availability-settings migration complete`);
+          }
+        } finally {
+          clearInterval(spacesHbInterval);
+        }
+        log.info(`listings: spaces + availability-settings migration complete (${spacesLoaded} spaces, ${availLoaded} avail)`);
       }
 
-      // ── Parallel calendar block migration (listings only) ─────────────────
-      // Runs after the creation loop so every parent and sub-unit ID is in
-      // idMap before we start.  Uses Promise.allSettled so one failure doesn't
-      // cancel the rest.  The semaphore in guestyClient caps at 5 concurrent
-      // Guesty API calls; calendar blocks are non-fatal if they fail.
+      // ── Sequential calendar block migration (listings only) ──────────────────
+      // ETL load phase: read pre-extracted blocks from migration_source_data.
+      // Sequential so progress is tracked per-item and resumable across restarts.
+      // Calendar blocks are non-fatal if they fail.
       if (category === 'listings') {
         const calPairs = Object.entries(idMap); // [[srcId, destId], ...]
-        log.info(`listings: migrating calendar blocks for ${calPairs.length} listing(s) in parallel`);
+        log.info(`listings: migrating calendar blocks for ${calPairs.length} listing(s) (ETL load from DB)`);
         const calHbInterval = setInterval(() => touchProgress(migrationId), 10000);
-        await Promise.allSettled(
-          calPairs.map(async ([srcId, destId]) => {
+
+        const alreadyLoadedCal = await getLoadedSourceIds(migrationId, 'calendar_load');
+        const allCalRows = await loadSourceData(migrationId, 'calendar');
+        const calRowMap = new Map(allCalRows.map(r => [r.sourceId, r.data]));
+
+        let calLoaded = 0;
+        try {
+          for (const [srcId, destId] of calPairs) {
+            if (alreadyLoadedCal.has(srcId)) continue;
             try {
-              const blocks = await sourceClient.getListingCalendarBlocks(srcId);
-              if (!blocks.length) return;
-              const ranges = groupContiguousDays(blocks);
-              for (const range of ranges) {
-                try {
-                  await destClient.blockListingCalendar(destId, range.start, range.end, range.note);
-                } catch (blockErr) {
-                  errors.push({ sourceId: srcId, type: 'calendar_block', range, error: blockErr.message });
+              const blocks = calRowMap.get(srcId) || [];
+              if (Array.isArray(blocks) && blocks.length > 0) {
+                const ranges = groupContiguousDays(blocks);
+                for (const range of ranges) {
+                  try {
+                    await destClient.blockListingCalendar(destId, range.start, range.end, range.note);
+                  } catch (blockErr) {
+                    errors.push({ sourceId: srcId, type: 'calendar_block', range, error: blockErr.message });
+                  }
                 }
               }
-            } catch { /* Non-fatal — listing was created, calendar blocks best-effort */ }
-          })
-        );
-        clearInterval(calHbInterval);
-        log.info(`listings: calendar block migration complete`);
+              await upsertLoadLog(migrationId, 'calendar_load', srcId, destId, 'loaded');
+              calLoaded++;
+            } catch (err) {
+              log.warn(`listings: calendar load failed for source ${srcId}`, { error: err.message });
+              await upsertLoadLog(migrationId, 'calendar_load', srcId, destId, 'failed', err.message);
+            }
+          }
+        } finally {
+          clearInterval(calHbInterval);
+        }
+        log.info(`listings: calendar block migration complete (${calLoaded} loaded)`);
       }
 
       // ── Post-processing: remap subListingsIds on MTL parent listings ────────
