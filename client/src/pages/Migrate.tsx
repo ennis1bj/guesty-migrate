@@ -94,6 +94,7 @@ interface MigrationStatus {
     source_count: number;
     migrated_count: number;
     failed_count: number;
+    skipped_count?: number;
   }>;
   error_message: string | null;
   created_at: string;
@@ -111,6 +112,14 @@ const CATEGORY_LABELS: Record<string, string> = {
   reservations: 'Reservations',
   tasks: 'Tasks',
   pricing_snapshot: 'Pricing Snapshot',
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  paid: 'Awaiting Migration',
+  running: 'Running',
+  complete: 'Complete',
+  complete_with_errors: 'Complete with Errors',
+  failed: 'Failed',
 };
 
 function formatElapsed(createdAt: string): string {
@@ -1260,6 +1269,8 @@ export default function Migrate() {
                 className={`px-3 py-1 rounded-full text-sm font-semibold ${
                   migrationStatus.status === 'complete'
                     ? 'bg-emerald-100 text-emerald-800'
+                    : migrationStatus.status === 'complete_with_errors'
+                    ? 'bg-yellow-100 text-yellow-800'
                     : migrationStatus.status === 'failed'
                     ? 'bg-red-100 text-red-800'
                     : migrationStatus.status === 'running'
@@ -1267,7 +1278,7 @@ export default function Migrate() {
                     : 'bg-stone-100 text-slate-700'
                 }`}
               >
-                {migrationStatus.status}
+                {STATUS_LABELS[migrationStatus.status] ?? migrationStatus.status}
               </span>
             )}
           </div>
@@ -1300,7 +1311,7 @@ export default function Migrate() {
           {/* Current activity panel — shown while running */}
           {migrationStatus?.status === 'running' && (() => {
             const activeLabel = activeCat ? (CATEGORY_LABELS[activeCat] ?? activeCat) : null;
-            const done = activeData?.migratedCount ?? 0;
+            const done = (activeData?.migratedCount ?? 0) + (activeData?.skippedCount ?? 0);
             const total = activeData?.sourceCount ?? 0;
             const failed = activeData?.failedCount ?? 0;
             const pct = total > 0 ? Math.round((done / total) * 100) : 0;
@@ -1340,7 +1351,7 @@ export default function Migrate() {
                 <ProgressBar
                   key={log.category}
                   label={CATEGORY_LABELS[log.category] ?? log.category}
-                  current={log.migrated_count}
+                  current={log.migrated_count + (log.skipped_count || 0)}
                   total={log.source_count}
                   status={log.status}
                 />
