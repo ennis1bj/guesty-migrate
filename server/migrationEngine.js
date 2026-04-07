@@ -840,18 +840,35 @@ async function runMigration(migrationId) {
         const pilotListingIds = migration.selected_listing_ids;
         const migratedSrcIds  = idMaps.listings ? Object.keys(idMaps.listings) : [];
 
-        // ── ETL: Load from DB if listing data is already extracted ─────────────
-        // On first run: rawItems comes from the source Guesty API below.
-        // On all subsequent runs (server restarts): rawItems loads from DB — this
-        // eliminates the 21-min MTL scan, OAuth-timeout-prone spaces fetches, etc.
+        // ── ETL: Load from DB if extraction is fully complete ─────────────────
+        // On first run (or after a partial mid-extract restart): no marker exists →
+        //   falls through to source API fetch below; upserts are idempotent.
+        // On all subsequent runs after a full extraction: marker present →
+        //   loads rawItems from DB (< 1 s), skips 21-min MTL scan entirely.
+        //
+        // The marker ('listing_extract_marker', '__complete__') is written only
+        // AFTER all listing rows AND sub-resources are stored in migration_source_data,
+        // making it safe to use as a completeness signal.  A partial extract (restart
+        // mid-upsert) has no marker and will re-fetch from source on the next run.
         let etlLoadedFromDb = false;
         if (category === 'listings') {
-          const etlListingCount = await getSourceDataCount(migrationId, 'listing');
-          if (etlListingCount > 0) {
-            log.info(`ETL: ${etlListingCount} listings already extracted — loading from DB, skipping source API`, { migrationId });
-            rawItems = (await loadSourceData(migrationId, 'listing')).map(r => r.data);
+          const markerRow = await pool.query(
+            `SELECT 1 FROM migration_source_data
+             WHERE migration_id = $1 AND category = 'listing_extract_marker'
+               AND source_id = '__complete__'`,
+            [migrationId]
+          );
+          if (markerRow.rows.length > 0) {
+            const rows = await loadSourceData(migrationId, 'listing');
+            log.info(`ETL: ${rows.length} listings fully extracted — loading from DB, skipping source API`, { migrationId });
+            rawItems = rows.map(r => r.data);
             effectivePilotIds = new Set(rawItems.map(r => r._id));
             etlLoadedFromDb = true;
+          } else {
+            const partial = await getSourceDataCount(migrationId, 'listing');
+            if (partial > 0) {
+              log.info(`ETL: ${partial} listing rows found but extract marker absent — prior run was interrupted; re-extracting from source API`, { migrationId });
+            }
           }
         }
 
@@ -1159,14 +1176,20 @@ async function runMigration(migrationId) {
           }
 
           // ── ETL: Store extracted listing data + sub-resources to DB ──────────
-          // Runs only on the first extraction (etlListingCount was 0 above).
-          // Subsequent restarts hit the etlListingCount > 0 early-exit above.
+          // Runs on any run where etlLoadedFromDb=false (no marker present).
+          // Upserts are idempotent so re-running after a partial extract is safe.
           if (Array.isArray(rawItems) && rawItems.length > 0) {
             log.info(`ETL: storing ${rawItems.length} listing(s) to DB (pilot mode)`, { migrationId });
             for (const item of rawItems) {
               if (item._id) await upsertSourceData(migrationId, 'listing', item._id, item);
             }
             await extractListingSubResources(migrationId, rawItems, sourceClient, log);
+            // Write completion marker ONLY after all rows + sub-resources are stored.
+            // The marker's presence is the signal that extraction is fully complete
+            // and subsequent restarts can skip source API calls entirely.
+            await upsertSourceData(migrationId, 'listing_extract_marker', '__complete__',
+              { completedAt: new Date().toISOString(), count: rawItems.length });
+            log.info(`ETL: extraction complete — marker written for ${rawItems.length} listing(s)`, { migrationId });
           }
 
         } else if (!etlLoadedFromDb && category === 'reservations' && pilotListingIds && migratedSrcIds.length) {
@@ -1194,6 +1217,10 @@ async function runMigration(migrationId) {
               if (item._id) await upsertSourceData(migrationId, 'listing', item._id, item);
             }
             await extractListingSubResources(migrationId, rawItems, sourceClient, log);
+            // Write completion marker after all rows + sub-resources stored
+            await upsertSourceData(migrationId, 'listing_extract_marker', '__complete__',
+              { completedAt: new Date().toISOString(), count: rawItems.length });
+            log.info(`ETL: extraction complete — marker written for ${rawItems.length} listing(s) (full-account)`, { migrationId });
           }
         }
       } catch (fetchErr) {
