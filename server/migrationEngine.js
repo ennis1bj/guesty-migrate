@@ -382,6 +382,15 @@ const CATEGORIES = {
         cleaned.parentId = maps.listings[cleaned.parentId] || cleaned.parentId;
       }
 
+      // nickname / internalName are globally unique across Guesty's multi-tenant
+      // system — sending the source value to a different account causes a 400
+      // "A listing with the nickname you chose already exists" conflict because
+      // another account already holds that name. Clear both fields so the
+      // destination account starts without a nickname; the client can assign
+      // their own internal names after migration.
+      delete cleaned.nickname;
+      delete cleaned.internalName;
+
       // rateStrategy references embed account-specific _id values that
       // stripFieldsDeep removes, causing Guesty's API to return
       // "rateStrategy._id: Path `_id` is required" when the object is present
