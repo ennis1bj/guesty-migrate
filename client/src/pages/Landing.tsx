@@ -306,8 +306,8 @@ export default function Landing() {
           </h1>
 
           <p className="text-lg sm:text-xl text-slate-300 max-w-3xl mx-auto mb-10 leading-relaxed">
-            Transfer all 11 data categories — listings, photos, reservations, guests, rate strategies, saved replies, and more
-            — between Guesty accounts fully automatically. Source account read-only. Verification report included.
+            Transfer all 11 data categories between Guesty accounts — fully automated, source account read-only, with a
+            verification report when it's done.
           </p>
 
           <div className="flex flex-col sm:flex-row justify-center gap-4">
