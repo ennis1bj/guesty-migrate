@@ -45,6 +45,11 @@ const features = [
     description: 'Message templates migrated with listing-scoped remapping so your canned responses work instantly.',
     icon: 'M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z',
   },
+  {
+    title: 'Pricing Snapshot',
+    description: 'Per-day price overrides (calendar pricing) migrated with full listing ID remapping to the destination account.',
+    icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z',
+  },
 ];
 
 const steps = [
@@ -56,7 +61,7 @@ const steps = [
   {
     step: '2',
     title: 'Review',
-    description: 'See exactly what data will migrate — listings, guests, reservations, and more. Select the categories you need.',
+    description: 'See exactly what will migrate. Select categories, and optionally pick individual listings for a phased or partial migration.',
   },
   {
     step: '3',
@@ -77,7 +82,7 @@ const fallbackTiers = [
     price: '$349',
     popular: false,
     features: [
-      'All 8 data categories',
+      'All 11 data categories',
       'Listings, photos & reservations',
       'Verification diff report',
       'Custom fields, fees & tasks',
@@ -90,7 +95,7 @@ const fallbackTiers = [
     price: '$699',
     popular: true,
     features: [
-      'All 8 data categories',
+      'All 11 data categories',
       'Full MTL complex listing support',
       'Verification diff report',
       'Custom fields, fees & tasks',
@@ -104,7 +109,7 @@ const fallbackTiers = [
     price: '$999',
     popular: false,
     features: [
-      'All 8 data categories',
+      'All 11 data categories',
       'Full MTL complex listing support',
       'Verification diff report',
       'Custom fields, fees & tasks',
@@ -118,7 +123,7 @@ const fallbackTiers = [
     price: '$1,499',
     popular: false,
     features: [
-      'All 8 data categories',
+      'All 11 data categories',
       'Full MTL complex listing support',
       'Verification diff report',
       'Custom fields, fees & tasks',
@@ -187,15 +192,19 @@ const faqs = [
   },
   {
     q: 'Is my data secure?',
-    a: 'Absolutely. All API credentials — Client IDs, Client Secrets, and OAuth tokens — are encrypted with AES-256 at rest and never stored in plain text. We connect to Guesty via their official Open API over HTTPS. You can also export or delete all your data at any time via your account settings.',
+    a: 'Absolutely. All API credentials — Client IDs, Client Secrets, and OAuth tokens — are encrypted with AES-256 at rest and never stored in plain text. We connect to Guesty via their official Open API over HTTPS. Your source account is never written to — we only read from it. You can also export or delete all your data at any time via your account settings.',
   },
   {
     q: 'What if something goes wrong?',
-    a: 'The migration engine handles rate limits and recovers from partial failures automatically. If a category fails, you can retry just that category without being charged again. A verification diff report confirms completeness.',
+    a: 'The migration engine uses a checkpoint architecture — each item is tracked as it completes. If a migration is interrupted or a category fails, resuming picks up exactly where it left off with no data double-migrated. You can retry a failed category without being charged again. A verification diff report confirms completeness when everything is done.',
   },
   {
     q: 'Can I choose which data to migrate?',
     a: 'Yes. After connecting, you\'ll see a manifest of all your source data. You can select or deselect individual categories — only pay for what you need.',
+  },
+  {
+    q: 'Can I migrate just specific listings?',
+    a: 'Yes. After validating your accounts you\'ll see a listing picker where you can select individual properties to migrate. Only those listings — and their associated reservations, tasks, and calendar blocks — will be transferred. This is ideal for phased migrations or testing a subset of your portfolio first.',
   },
 ];
 
@@ -297,8 +306,8 @@ export default function Landing() {
           </h1>
 
           <p className="text-lg sm:text-xl text-slate-300 max-w-3xl mx-auto mb-10 leading-relaxed">
-            Transfer listings, reservations, guests, photos, rate strategies, saved replies, and 11 data categories
-            between Guesty accounts — fully automated with complex listing support and a verification report.
+            Transfer all 11 data categories — listings, photos, reservations, guests, rate strategies, saved replies, and more
+            — between Guesty accounts fully automatically. Source account read-only. Verification report included.
           </p>
 
           <div className="flex flex-col sm:flex-row justify-center gap-4">
@@ -348,6 +357,13 @@ export default function Landing() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               <span className="text-sm font-semibold">Verification Report</span>
+            </div>
+            <div className="w-px h-5 bg-stone-200 hidden sm:block" />
+            <div className="flex items-center gap-2 text-slate-600">
+              <svg className="w-5 h-5 text-sky-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+              <span className="text-sm font-semibold">Source Read-Only</span>
             </div>
           </div>
         </div>
@@ -523,8 +539,8 @@ export default function Landing() {
                         { cat: 'Guests', count: '312', on: true },
                         { cat: 'Reservations', count: '486', on: true },
                         { cat: 'Rate Strategies', count: '14', on: true },
-                        { cat: 'Automations', count: '22', on: true },
-                        { cat: 'Calendar Blocks', count: '203', on: false },
+                        { cat: 'Pricing Snapshot', count: '203', on: true },
+                        { cat: 'Calendar Blocks', count: '91', on: false },
                       ].map((row) => (
                         <tr key={row.cat} className="hover:bg-stone-50">
                           <td className="px-5 py-2.5 text-xs font-medium text-slate-700">{row.cat}</td>
@@ -599,7 +615,7 @@ export default function Landing() {
                       { label: 'Photos',           pct: 68,  status: 'running'  },
                       { label: 'Guests',           pct: 100, status: 'complete' },
                       { label: 'Reservations',     pct: 41,  status: 'running'  },
-                      { label: 'Automations',      pct: 0,   status: 'pending'  },
+                      { label: 'Saved Replies',    pct: 0,   status: 'pending'  },
                     ].map((row) => (
                       <div key={row.label}>
                         <div className="flex justify-between items-center mb-1">
@@ -628,7 +644,7 @@ export default function Landing() {
           <div className="mt-8 text-center max-w-xl mx-auto">
             {[
               { title: 'Connect & Validate', desc: 'Enter your source and destination Guesty API credentials. Both accounts are verified instantly before anything moves.' },
-              { title: 'Review Your Manifest', desc: 'See exactly what data will migrate — listings, guests, reservations, photos, and more. Select only the categories you need.' },
+              { title: 'Review Your Manifest', desc: 'See exactly what data will migrate. Select the categories you need, then optionally pick individual listings for a phased or partial migration — perfect for testing before committing your full portfolio.' },
               { title: 'Choose Pricing & Pay', desc: 'Pick flat-rate or per-listing pricing. Add optional extras. Pay securely via Stripe — no subscription, no hidden fees.' },
               { title: 'Track Progress & Verify', desc: 'Watch real-time progress bars per category, then review the full verification diff report to confirm everything transferred correctly.' },
             ].map((s, i) => (
@@ -918,7 +934,7 @@ export default function Landing() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl mx-auto">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 max-w-5xl mx-auto">
             <div className="text-center p-6 bg-[#fafaf8] rounded-2xl border border-stone-200">
               <p className="text-5xl font-extrabold text-amber-500 mb-3">11</p>
               <p className="text-slate-700 font-semibold">Data Categories</p>
@@ -933,6 +949,11 @@ export default function Landing() {
               <p className="text-5xl font-extrabold text-amber-500 mb-3">AES-256</p>
               <p className="text-slate-700 font-semibold">Encryption</p>
               <p className="text-sm text-slate-400 mt-1">Credentials secured at rest</p>
+            </div>
+            <div className="text-center p-6 bg-[#fafaf8] rounded-2xl border border-stone-200">
+              <p className="text-5xl font-extrabold text-amber-500 mb-3">0</p>
+              <p className="text-slate-700 font-semibold">Migration Failures</p>
+              <p className="text-sm text-slate-400 mt-1">109 listings, 23 min run</p>
             </div>
           </div>
         </div>
